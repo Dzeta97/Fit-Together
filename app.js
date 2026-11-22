@@ -1,8 +1,9 @@
-
+```javascript
 (() => {
   const client = window.fitTogetherSupabase;
   const BUCKET = "fit-together-proofs";
   const MAX_FILE_SIZE = 10 * 1024 * 1024;
+  let notificationRefreshTimer = null;
 
   if (!client) {
     console.error("FIT TOGETHER: Supabase client non trovato.");
@@ -347,7 +348,123 @@
       line-height:1.5;
     }
 
-    @media (max-width:380px) {
+    .ft-notification-area {
+      position:relative;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+
+    .ft-bell-button {
+      position:relative;
+      width:40px !important;
+      height:40px;
+      padding:0 !important;
+      display:grid;
+      place-items:center;
+      border:1px solid var(--border) !important;
+      border-radius:12px;
+      background:var(--field) !important;
+      color:var(--text) !important;
+      font-size:19px !important;
+      cursor:pointer;
+    }
+
+    .ft-bell-count {
+      position:absolute;
+      top:-6px;
+      right:-6px;
+      min-width:18px;
+      height:18px;
+      padding:0 4px;
+      display:grid;
+      place-items:center;
+      border-radius:20px;
+      background:#d9364f;
+      color:#fff;
+      font-size:10px;
+      font-weight:800;
+      border:2px solid var(--card);
+    }
+
+    .ft-notification-panel {
+      display:none;
+      margin-top:12px;
+    }
+
+    .ft-notification-panel.open {
+      display:block;
+    }
+
+    .ft-notification-list {
+      display:grid;
+      gap:8px;
+      margin-top:10px;
+    }
+
+    .ft-notification-item {
+      width:100%;
+      margin:0;
+      padding:12px;
+      display:grid;
+      gap:5px;
+      text-align:left;
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:var(--field);
+      color:var(--text);
+      cursor:pointer;
+    }
+
+    .ft-notification-item.unread {
+      border-color:var(--accent);
+      background:var(--card);
+    }
+
+    .ft-notification-item:disabled {
+      opacity:.6;
+      cursor:wait;
+    }
+
+    .ft-notification-message {
+      font-size:13px;
+      line-height:1.4;
+    }
+
+    .ft-notification-meta {
+      color:var(--muted);
+      font-size:11px;
+    }
+
+    .ft-notification-toolbar {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+    }
+
+    .ft-notification-toolbar button {
+      width:auto;
+      margin:0;
+      padding:6px 9px;
+      border:1px solid var(--border);
+      border-radius:8px;
+      background:transparent;
+      color:var(--text);
+      font:inherit;
+      font-size:11px;
+      cursor:pointer;
+    }
+
+    .ft-notification-empty {
+      padding:12px;
+      color:var(--muted);
+      font-size:13px;
+      background:var(--field);
+      border-radius:10px;
+    }
+
+        @media (max-width:380px) {
       .ft-slot {
         gap:8px;
       }
@@ -978,7 +1095,7 @@
           : "";
 
         return `
-          <div class="ft-review-card">
+          <div class="ft-review-card" data-workout-card-id="${escapeHtml(workout.id)}">
 
             <div class="ft-review-top">
               <div class="ft-review-title">
@@ -1044,6 +1161,103 @@
     return cards.join("");
   }
 
+  function formatNotificationTime(value) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleString("it-IT", {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
+
+  function renderNotifications(notifications) {
+    if (!notifications.length) {
+      return '<div class="ft-notification-empty">Non hai notifiche.</div>';
+    }
+
+    return notifications.map(notification => `
+      <button
+        type="button"
+        class="ft-notification-item ${notification.is_read ? "" : "unread"}"
+        data-notification-id="${escapeHtml(notification.id)}"
+        data-notification-workout="${escapeHtml(notification.workout_id || "")}"
+        data-notification-type="${escapeHtml(notification.notification_type)}">
+        <strong>${escapeHtml(notification.title)}</strong>
+        <span class="ft-notification-message">${escapeHtml(notification.message)}</span>
+        <span class="ft-notification-meta">${escapeHtml(formatNotificationTime(notification.created_at))}${notification.is_read ? " · Letta" : " · Nuova"}</span>
+      </button>
+    `).join("");
+  }
+
+  async function markNotificationRead(notificationId) {
+    const { error } = await client.rpc("mark_notification_read", {
+      p_notification_id: notificationId
+    });
+    if (error) throw error;
+  }
+
+  async function refreshNotifications(user) {
+    const { data, error } = await client
+      .from("notifications")
+      .select("id, title, message, notification_type, workout_id, is_read, created_at")
+      .eq("recipient_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    if (error) throw error;
+
+    const notifications = data || [];
+    const unreadCount = notifications.filter(item => !item.is_read).length;
+    const countElement = document.getElementById("ftBellCount");
+    const listElement = document.getElementById("ftNotificationList");
+
+    if (countElement) {
+      countElement.textContent = unreadCount > 99 ? "99+" : String(unreadCount);
+      countElement.hidden = unreadCount === 0;
+    }
+
+    if (listElement) {
+      listElement.innerHTML = renderNotifications(notifications);
+      listElement.querySelectorAll("[data-notification-id]").forEach(button => {
+        button.addEventListener("click", async () => {
+          const notificationId = button.dataset.notificationId;
+          const workoutId = button.dataset.notificationWorkout;
+          const notificationType = button.dataset.notificationType;
+          button.disabled = true;
+
+          try {
+            await markNotificationRead(notificationId);
+            await loadDashboard(user);
+
+            if (notificationType === "workout_submitted" && workoutId) {
+              const target = document.querySelector(
+                `[data-workout-card-id="${workoutId}"]`
+              );
+              (target || document.getElementById("ftReviewSection"))?.scrollIntoView({
+                behavior: "smooth",
+                block: "center"
+              });
+            } else {
+              document.getElementById("ftOwnGoalsSection")?.scrollIntoView({
+                behavior: "smooth",
+                block: "start"
+              });
+            }
+          } catch (error) {
+            console.error("FIT TOGETHER notification error:", error);
+            button.disabled = false;
+            alert(error.message || "Non è stato possibile aprire la notifica.");
+          }
+        });
+      });
+    }
+
+    return notifications;
+  }
+
   async function loadDashboard(user) {
     const container = document.getElementById("challengeCard");
 
@@ -1103,7 +1317,8 @@
       const [
         membersResult,
         workoutsResult,
-        pendingResult
+        pendingResult,
+        notificationsResult
       ] = await Promise.all([
 
         client
@@ -1148,17 +1363,27 @@
           .eq("challenge_id", ownMember.challenge_id)
           .eq("status", "pending")
           .neq("member_id", ownMember.id)
-          .order("created_at", { ascending: true })
+          .order("created_at", { ascending: true }),
+
+        client
+          .from("notifications")
+          .select("id, title, message, notification_type, workout_id, is_read, created_at")
+          .eq("recipient_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(20)
 
       ]);
 
       if (membersResult.error) throw membersResult.error;
       if (workoutsResult.error) throw workoutsResult.error;
       if (pendingResult.error) throw pendingResult.error;
+      if (notificationsResult.error) throw notificationsResult.error;
 
       const members = membersResult.data || [];
       const workouts = workoutsResult.data || [];
       const pendingWorkouts = pendingResult.data || [];
+      const notifications = notificationsResult.data || [];
+      const unreadNotifications = notifications.filter(item => !item.is_read).length;
 
       const ownSlots = getPlanSlots(ownMember.weekly_plan);
 
@@ -1217,6 +1442,10 @@
         user
       );
 
+      const partner = members.find(member => member.id !== ownMember.id);
+      const partnerName = partner?.display_name || "il tuo partner";
+      const notificationListHtml = renderNotifications(notifications);
+
       container.innerHTML = `
         <div class="ft-dashboard">
 
@@ -1225,9 +1454,33 @@
               FIT TOGETHER · LA TUA CHALLENGE
             </div>
 
-            <button type="button" id="ftLogout">
-              Esci
-            </button>
+            <div class="ft-notification-area">
+              <button type="button"
+                class="ft-bell-button"
+                id="ftBellButton"
+                aria-label="Apri notifiche"
+                aria-expanded="false">
+                🔔
+                <span class="ft-bell-count" id="ftBellCount"
+                  ${unreadNotifications === 0 ? "hidden" : ""}>
+                  ${unreadNotifications > 99 ? "99+" : unreadNotifications}
+                </span>
+              </button>
+
+              <button type="button" id="ftLogout">
+                Esci
+              </button>
+            </div>
+          </div>
+
+          <div class="ft-panel ft-notification-panel" id="ftNotificationPanel">
+            <div class="ft-notification-toolbar">
+              <strong>Notifiche</strong>
+              <button type="button" id="ftRefreshNotifications">Aggiorna</button>
+            </div>
+            <div class="ft-notification-list" id="ftNotificationList">
+              ${notificationListHtml}
+            </div>
           </div>
 
           <div class="ft-panel">
@@ -1256,7 +1509,7 @@
 
           </div>
 
-          <div class="ft-panel">
+          <div class="ft-panel" id="ftOwnGoalsSection">
 
             <h2 style="margin:0 0 5px">
               I tuoi obiettivi
@@ -1272,7 +1525,7 @@
 
           </div>
 
-          <div class="ft-panel">
+          <div class="ft-panel" id="ftReviewSection">
 
             <div class="ft-review-top">
               <h2 style="margin:0">
@@ -1285,7 +1538,7 @@
             </div>
 
             <div class="ft-subtitle" style="margin-top:5px">
-              Qui trovi gli allenamenti inviati dal tuo partner.
+              Qui trovi gli allenamenti inviati da ${escapeHtml(partnerName)}.
             </div>
 
             <div class="ft-review-list">
@@ -1312,6 +1565,71 @@
         </div>
       `;
 
+      const bellButton = document.getElementById("ftBellButton");
+      const notificationPanel = document.getElementById("ftNotificationPanel");
+
+      bellButton.addEventListener("click", async () => {
+        const isOpen = notificationPanel.classList.toggle("open");
+        bellButton.setAttribute("aria-expanded", String(isOpen));
+
+        if (isOpen) {
+          try {
+            await refreshNotifications(user);
+          } catch (error) {
+            console.error("FIT TOGETHER notification refresh error:", error);
+          }
+        }
+      });
+
+      document.getElementById("ftRefreshNotifications")
+        .addEventListener("click", async () => {
+          const refreshButton = document.getElementById("ftRefreshNotifications");
+          refreshButton.disabled = true;
+          refreshButton.textContent = "Aggiornamento...";
+          try {
+            await refreshNotifications(user);
+          } catch (error) {
+            console.error("FIT TOGETHER notification refresh error:", error);
+            alert(error.message || "Non è stato possibile aggiornare le notifiche.");
+          } finally {
+            refreshButton.disabled = false;
+            refreshButton.textContent = "Aggiorna";
+          }
+        });
+
+      container.querySelectorAll("[data-notification-id]").forEach(button => {
+        button.addEventListener("click", async () => {
+          const notificationId = button.dataset.notificationId;
+          const workoutId = button.dataset.notificationWorkout;
+          const notificationType = button.dataset.notificationType;
+          button.disabled = true;
+
+          try {
+            await markNotificationRead(notificationId);
+            await loadDashboard(user);
+
+            if (notificationType === "workout_submitted" && workoutId) {
+              const target = document.querySelector(
+                `[data-workout-card-id="${workoutId}"]`
+              );
+              (target || document.getElementById("ftReviewSection"))?.scrollIntoView({
+                behavior: "smooth",
+                block: "center"
+              });
+            } else {
+              document.getElementById("ftOwnGoalsSection")?.scrollIntoView({
+                behavior: "smooth",
+                block: "start"
+              });
+            }
+          } catch (error) {
+            console.error("FIT TOGETHER notification error:", error);
+            button.disabled = false;
+            alert(error.message || "Non è stato possibile aprire la notifica.");
+          }
+        });
+      });
+
       container.querySelectorAll(".ft-load-button").forEach(button => {
         button.addEventListener("click", () => {
           showWorkoutForm(ownMember, button.dataset.slot);
@@ -1330,10 +1648,24 @@
       document.getElementById("ftLogout").addEventListener(
         "click",
         async () => {
+          if (notificationRefreshTimer) {
+            clearInterval(notificationRefreshTimer);
+            notificationRefreshTimer = null;
+          }
           await client.auth.signOut();
           location.reload();
         }
       );
+
+      if (notificationRefreshTimer) {
+        clearInterval(notificationRefreshTimer);
+      }
+
+      notificationRefreshTimer = setInterval(() => {
+        refreshNotifications(user).catch(error => {
+          console.error("FIT TOGETHER notification polling error:", error);
+        });
+      }, 30000);
 
     } catch (error) {
       console.error("FIT TOGETHER dashboard error:", error);
