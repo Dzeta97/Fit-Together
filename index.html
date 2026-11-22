@@ -156,6 +156,7 @@
   const SUPABASE_KEY = "sb_publishable_apZnTfVl3msE3HbvvcTdEw_MCtjOSJZ";
 
   const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  window.fitTogetherSupabase = client;
 
   const $ = (id) => document.getElementById(id);
 
@@ -276,5 +277,6 @@
     else showLoggedOut();
   });
 </script>
+<script src="app.js"></script>
 </body>
 </html>
