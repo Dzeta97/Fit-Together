@@ -1,6 +1,8 @@
 
 (() => {
   const client = window.fitTogetherSupabase;
+  const BUCKET = "fit-together-proofs";
+  const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
   if (!client) {
     console.error("FIT TOGETHER: Supabase client non trovato.");
@@ -20,8 +22,8 @@
       background:var(--border); margin:13px 0 7px;
     }
     .ft-progress-fill {
-      height:100%; background:var(--accent); border-radius:20px;
-      transition:width .2s;
+      height:100%; background:var(--accent);
+      border-radius:20px; transition:width .2s;
     }
     .ft-slot {
       display:flex; align-items:center; gap:12px;
@@ -30,8 +32,8 @@
     .ft-slot:last-child { border-bottom:0; padding-bottom:0; }
     .ft-slot-icon {
       width:42px; height:42px; display:grid; place-items:center;
-      background:var(--field); border-radius:12px; font-size:20px;
-      flex-shrink:0;
+      background:var(--field); border-radius:12px;
+      font-size:20px; flex-shrink:0;
     }
     .ft-slot-info { flex:1; min-width:0; }
     .ft-slot-title { font-weight:750; font-size:14px; }
@@ -50,13 +52,30 @@
     }
     .ft-member:last-child { border-bottom:0; }
     .ft-small { color:var(--muted); font-size:12px; }
-    .ft-toolbar { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .ft-toolbar {
+      display:flex; align-items:center;
+      justify-content:space-between; gap:10px;
+    }
     .ft-toolbar button {
       width:auto; margin:0; padding:9px 12px;
       font-size:12px; border:1px solid var(--border);
       background:transparent; color:var(--text);
     }
     .ft-error { color:#c34a50; font-size:13px; line-height:1.5; }
+
+    .ft-form { display:grid; gap:13px; margin-top:16px; }
+    .ft-form label { display:grid; gap:6px; }
+    .ft-form input, .ft-form select, .ft-form textarea {
+      width:100%; box-sizing:border-box;
+      padding:12px; border:1px solid var(--border);
+      border-radius:10px; background:var(--field);
+      color:var(--text); font:inherit; font-size:14px;
+    }
+    .ft-form button { width:100%; }
+    .ft-form button:disabled { opacity:.55; cursor:not-allowed; }
+    .ft-message { font-size:13px; line-height:1.5; }
+    .ft-message.error { color:#c34a50; }
+    .ft-message.success { color:#16845f; }
   `;
 
   if (!document.getElementById("ft-dashboard-styles")) {
@@ -66,10 +85,11 @@
     document.head.appendChild(style);
   }
 
-  const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, char => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;",
-    '"': "&quot;", "'": "&#039;"
-  })[char]);
+  const escapeHtml = (value) =>
+    String(value ?? "").replace(/[&<>"']/g, char => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;",
+      '"': "&quot;", "'": "&#039;"
+    })[char]);
 
   function localDateString(date) {
     const year = date.getFullYear();
@@ -81,14 +101,17 @@
   function getCurrentWeek() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+
     const monday = new Date(today);
     monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+
     const sunday = new Date(monday);
     sunday.setDate(monday.getDate() + 6);
 
     return {
       start: localDateString(monday),
-      end: localDateString(sunday)
+      end: localDateString(sunday),
+      today: localDateString(today)
     };
   }
 
@@ -118,6 +141,7 @@
   function renderSlot(slot, workouts) {
     const entry = workouts.find(item => item.session_slot === slot.id);
     const status = entry?.status || "empty";
+
     const detail = entry
       ? `${entry.activity_date} · ${entry.duration_minutes} min${entry.distance_km ? ` · ${entry.distance_km} km` : ""}`
       : slot.description;
@@ -134,6 +158,169 @@
     `;
   }
 
+  function activityOptions(slotId) {
+    if (slotId === "gym_1" || slotId === "gym_2") {
+      return [{ value: "gym", label: "Palestra" }];
+    }
+
+    if (slotId === "run") {
+      return [{ value: "run", label: "Corsa" }];
+    }
+
+    return [
+      { value: "trekking", label: "Trekking" },
+      { value: "cycling", label: "Ciclismo" },
+      { value: "skiing", label: "Sci" },
+      { value: "gym", label: "Palestra" },
+      { value: "other", label: "Altro sport" }
+    ];
+  }
+
+  function updateActivityOptions() {
+    const slot = document.getElementById("ftSessionSlot");
+    const activity = document.getElementById("ftActivityType");
+
+    if (!slot || !activity) return;
+
+    activity.innerHTML = activityOptions(slot.value)
+      .map(item => `<option value="${item.value}">${item.label}</option>`)
+      .join("");
+  }
+
+  async function submitWorkout(event, member) {
+    event.preventDefault();
+
+    const form = event.currentTarget;
+    const button = document.getElementById("ftSubmitWorkout");
+    const message = document.getElementById("ftWorkoutMessage");
+
+    if (!form || !button || !message) return;
+
+    const slot = document.getElementById("ftSessionSlot").value;
+    const activity = document.getElementById("ftActivityType").value;
+    const date = document.getElementById("ftActivityDate").value;
+    const duration = Number(document.getElementById("ftDuration").value);
+    const distanceValue = document.getElementById("ftDistance").value;
+    const notes = document.getElementById("ftNotes").value.trim();
+    const file = document.getElementById("ftProof").files[0];
+
+    const week = getCurrentWeek();
+
+    if (!date || date < week.start || date > week.today) {
+      message.textContent = "Seleziona una data compresa nella settimana corrente e non futura.";
+      message.className = "ft-message error";
+      return;
+    }
+
+    if (!Number.isInteger(duration) || duration < 1 || duration > 1440) {
+      message.textContent = "Inserisci una durata valida in minuti.";
+      message.className = "ft-message error";
+      return;
+    }
+
+    const distance = distanceValue === "" ? null : Number(distanceValue);
+
+    if (distance !== null && (!Number.isFinite(distance) || distance < 0)) {
+      message.textContent = "Inserisci una distanza valida.";
+      message.className = "ft-message error";
+      return;
+    }
+
+    if (!file) {
+      message.textContent = "Devi caricare una foto di prova.";
+      message.className = "ft-message error";
+      return;
+    }
+
+    if (file.size > MAX_FILE_SIZE) {
+      message.textContent = "La foto supera il limite massimo di 10 MB.";
+      message.className = "ft-message error";
+      return;
+    }
+
+    const allowedTypes = [
+      "image/jpeg", "image/png", "image/webp", "image/heic"
+    ];
+
+    if (!allowedTypes.includes(file.type)) {
+      message.textContent = "Formato non supportato. Usa JPEG, PNG, WEBP o HEIC.";
+      message.className = "ft-message error";
+      return;
+    }
+
+    button.disabled = true;
+    button.textContent = "Invio in corso...";
+    message.textContent = "Caricamento della foto e registrazione dell'allenamento...";
+    message.className = "ft-message";
+
+    let uploadedPath = null;
+
+    try {
+      const originalExtension = file.name.split(".").pop().toLowerCase();
+      const safeExtension = /^[a-z0-9]+$/.test(originalExtension)
+        ? originalExtension
+        : "jpg";
+
+      const fileName = `${crypto.randomUUID()}.${safeExtension}`;
+
+      uploadedPath = `${member.challenge_id}/${member.id}/${fileName}`;
+
+      const { error: uploadError } = await client.storage
+        .from(BUCKET)
+        .upload(uploadedPath, file, {
+          cacheControl: "3600",
+          upsert: false,
+          contentType: file.type
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { error: insertError } = await client
+        .from("workout_entries")
+        .insert({
+          challenge_id: member.challenge_id,
+          member_id: member.id,
+          session_slot: slot,
+          activity_type: activity,
+          activity_date: date,
+          duration_minutes: duration,
+          distance_km: distance,
+          notes: notes || null,
+          proof_path: uploadedPath
+        });
+
+      if (insertError) throw insertError;
+
+      message.textContent = "Allenamento inviato! Ora è in attesa di approvazione del partner.";
+      message.className = "ft-message success";
+
+      form.reset();
+      updateActivityOptions();
+
+      await loadDashboard(member.user);
+
+    } catch (error) {
+      console.error("FIT TOGETHER workout error:", error);
+
+      if (uploadedPath) {
+        const { error: cleanupError } = await client.storage
+          .from(BUCKET)
+          .remove([uploadedPath]);
+
+        if (cleanupError) {
+          console.error("Errore durante la pulizia della foto:", cleanupError);
+        }
+      }
+
+      message.textContent = error.message || "Non è stato possibile inviare l'allenamento.";
+      message.className = "ft-message error";
+
+    } finally {
+      button.disabled = false;
+      button.textContent = "Invia allenamento";
+    }
+  }
+
   async function loadDashboard(user) {
     const container = document.getElementById("challengeCard");
     if (!container || !user) return;
@@ -145,12 +332,13 @@
         <p class="ft-small">Stiamo recuperando i vostri progressi.</p>
       </div>
     `;
+
     container.classList.remove("hidden");
 
     try {
       const { data: ownMember, error: memberError } = await client
         .from("challenge_members")
-        .select("id, challenge_id, display_name, weekly_plan")
+        .select("id, challenge_id, display_name, weekly_plan, user_id")
         .eq("user_id", user.id)
         .order("joined_at", { ascending: true })
         .limit(1)
@@ -168,6 +356,8 @@
         `;
         return;
       }
+
+      ownMember.user = user;
 
       const week = getCurrentWeek();
 
@@ -193,7 +383,6 @@
       const members = membersResult.data || [];
       const workouts = workoutsResult.data || [];
       const ownSlots = getPlanSlots(ownMember.weekly_plan);
-
       const ownWorkouts = workouts.filter(item => item.member_id === ownMember.id);
 
       const activeOwnWorkouts = ownSlots.map(slot =>
@@ -209,17 +398,13 @@
 
       const progress = Math.round((approvedCount / 3) * 100);
 
-      const partner = members.find(member => member.user_id !== user.id);
-      const partnerSlots = partner ? getPlanSlots(partner.weekly_plan) : [];
-      const partnerWorkouts = partner
-        ? workouts.filter(item => item.member_id === partner.id)
-        : [];
-
-      const weekLabel = `${week.start.split("-").reverse().join("/")} – ${week.end.split("-").reverse().join("/")}`;
+      const weekLabel =
+        `${week.start.split("-").reverse().join("/")} – ${week.end.split("-").reverse().join("/")}`;
 
       const memberSummary = members.map(member => {
         const slots = getPlanSlots(member.weekly_plan);
         const memberEntries = workouts.filter(item => item.member_id === member.id);
+
         const count = slots.filter(slot =>
           memberEntries.some(item =>
             item.session_slot === slot.id && item.status === "approved"
@@ -251,7 +436,9 @@
               <div class="ft-progress-fill" style="width:${progress}%"></div>
             </div>
             <strong>${approvedCount} di 3 allenamenti approvati</strong>
-            <div class="ft-small" style="margin-top:5px">Solo gli allenamenti approvati contano per il tuo obiettivo.</div>
+            <div class="ft-small" style="margin-top:5px">
+              Solo gli allenamenti approvati contano per il tuo obiettivo.
+            </div>
           </div>
 
           <div class="ft-panel">
@@ -267,31 +454,74 @@
           </div>
 
           <div class="ft-panel">
-            <h2 style="margin:0 0 5px">Prossime funzionalità</h2>
-            <div class="ft-slot">
-              <div class="ft-slot-icon">📸</div>
-              <div class="ft-slot-info">
-                <div class="ft-slot-title">Caricamento allenamento</div>
-                <div class="ft-slot-detail">Registra attività e prova fotografica</div>
-              </div>
+            <h2 style="margin:0 0 5px">Registra un allenamento 💪</h2>
+            <div class="ft-subtitle">
+              Inserisci la tua sessione e carica una prova fotografica.
             </div>
-            <div class="ft-slot">
-              <div class="ft-slot-icon">🤝</div>
-              <div class="ft-slot-info">
-                <div class="ft-slot-title">Approvazione partner</div>
-                <div class="ft-slot-detail">Controlla e approva le sessioni</div>
-              </div>
-            </div>
-            <div class="ft-slot">
-              <div class="ft-slot-icon">⚖️</div>
-              <div class="ft-slot-info">
-                <div class="ft-slot-title">Pesate e statistiche</div>
-                <div class="ft-slot-detail">Segui i progressi nel tempo</div>
-              </div>
-            </div>
+
+            <form id="ftWorkoutForm" class="ft-form">
+
+              <label>
+                <span class="ft-small">Sessione settimanale</span>
+                <select id="ftSessionSlot" required>
+                  ${ownSlots.map(slot =>
+                    `<option value="${slot.id}">${escapeHtml(slot.title)}</option>`
+                  ).join("")}
+                </select>
+              </label>
+
+              <label>
+                <span class="ft-small">Tipo di attività</span>
+                <select id="ftActivityType" required></select>
+              </label>
+
+              <label>
+                <span class="ft-small">Data dell'attività</span>
+                <input id="ftActivityDate" type="date"
+                  min="${week.start}" max="${week.today}" value="${week.today}" required>
+              </label>
+
+              <label>
+                <span class="ft-small">Durata (minuti)</span>
+                <input id="ftDuration" type="number" min="1" max="1440"
+                  required placeholder="Es. 60">
+              </label>
+
+              <label>
+                <span class="ft-small">Distanza (km) – facoltativa</span>
+                <input id="ftDistance" type="number" min="0" step="0.01"
+                  placeholder="Es. 5.5">
+              </label>
+
+              <label>
+                <span class="ft-small">Note – facoltative</span>
+                <textarea id="ftNotes" rows="3" maxlength="1000"
+                  placeholder="Aggiungi qualche dettaglio..."></textarea>
+              </label>
+
+              <label>
+                <span class="ft-small">Foto di prova (max 10 MB)</span>
+                <input id="ftProof" type="file"
+                  accept="image/jpeg,image/png,image/webp,image/heic" required>
+              </label>
+
+              <button type="submit" id="ftSubmitWorkout">
+                Invia allenamento
+              </button>
+
+              <div id="ftWorkoutMessage" class="ft-message" aria-live="polite"></div>
+            </form>
           </div>
         </div>
       `;
+
+      updateActivityOptions();
+
+      document.getElementById("ftSessionSlot")
+        .addEventListener("change", updateActivityOptions);
+
+      document.getElementById("ftWorkoutForm")
+        .addEventListener("submit", event => submitWorkout(event, ownMember));
 
       document.getElementById("ftLogout").addEventListener("click", async () => {
         await client.auth.signOut();
@@ -300,6 +530,7 @@
 
     } catch (error) {
       console.error("FIT TOGETHER dashboard error:", error);
+
       container.innerHTML = `
         <div class="ft-panel">
           <h2>Non riusciamo a caricare la dashboard</h2>
@@ -322,3 +553,4 @@
     }
   });
 })();
+
