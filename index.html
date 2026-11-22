@@ -1,0 +1,280 @@
+
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101827">
+  <title>FIT TOGETHER</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f3f5f8;
+      --card: #ffffff;
+      --text: #172033;
+      --muted: #687386;
+      --accent: #36b58a;
+      --border: #e1e6ed;
+      --field: #f8fafc;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101827;
+        --card: #1b2638;
+        --text: #f2f5fa;
+        --muted: #aab5c5;
+        --accent: #48d1a1;
+        --border: #344156;
+        --field: #121d2d;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px 16px;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    main { width: 100%; max-width: 460px; }
+    header { text-align: center; margin-bottom: 26px; }
+    .logo {
+      width: 62px; height: 62px; margin: 0 auto 14px;
+      display: grid; place-items: center;
+      border-radius: 20px; background: var(--accent);
+      color: #08271d; font-size: 27px; font-weight: 900;
+    }
+    h1 { margin: 0; font-size: 29px; letter-spacing: 1.5px; }
+    header p { color: var(--muted); margin: 8px 0 0; }
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 20px; padding: 22px; margin-bottom: 16px;
+      box-shadow: 0 8px 30px rgba(0,0,0,.05);
+    }
+    h2 { font-size: 18px; margin: 0 0 16px; }
+    label { display: block; font-size: 13px; color: var(--muted); margin: 13px 0 6px; }
+    input {
+      width: 100%; padding: 13px 14px; border-radius: 11px;
+      border: 1px solid var(--border); background: var(--field);
+      color: var(--text); font-size: 16px; outline: none;
+    }
+    input:focus { border-color: var(--accent); }
+    button {
+      width: 100%; border: 0; border-radius: 12px; padding: 14px;
+      margin-top: 15px; background: var(--accent); color: #08271d;
+      font-size: 15px; font-weight: 750; cursor: pointer;
+    }
+    button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+    button:disabled { opacity: .55; cursor: wait; }
+    .muted { color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .message {
+      display: none; padding: 12px; border-radius: 10px;
+      margin-top: 14px; font-size: 14px; overflow-wrap: anywhere;
+      background: var(--field); border: 1px solid var(--border);
+    }
+    .message.show { display: block; }
+    .invite {
+      font-size: 27px; font-weight: 850; letter-spacing: 3px;
+      text-align: center; padding: 16px; border-radius: 12px;
+      background: var(--field); margin: 12px 0;
+    }
+    .hidden { display: none !important; }
+    .topline { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .topline button { width: auto; margin: 0; padding: 9px 13px; font-size: 13px; }
+    footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 22px; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="logo">FT</div>
+    <h1>FIT TOGETHER</h1>
+    <p>Two people. One challenge. Stronger together.</p>
+  </header>
+
+  <section id="loginCard" class="card">
+    <h2>Accedi al tuo account</h2>
+    <form id="loginForm">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" required placeholder="La tua email">
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required placeholder="La tua password">
+      <button id="loginButton" type="submit">Accedi</button>
+    </form>
+    <p class="muted">Utilizza l'email e la password dell'account creato in Supabase.</p>
+    <div id="loginMessage" class="message" role="status"></div>
+  </section>
+
+  <section id="challengeCard" class="card hidden">
+    <div class="topline">
+      <div>
+        <h2 style="margin-bottom:4px">La tua challenge</h2>
+        <div id="signedInEmail" class="muted"></div>
+      </div>
+      <button class="secondary" id="logoutButton" type="button">Esci</button>
+    </div>
+
+    <div style="border-top:1px solid var(--border); margin:18px 0"></div>
+
+    <h2>Crea una nuova challenge</h2>
+    <form id="createForm">
+      <label for="createName">Il tuo nome</label>
+      <input id="createName" required maxlength="40" placeholder="Es. Alex">
+      <button id="createButton" type="submit">Crea FIT TOGETHER</button>
+    </form>
+
+    <div style="text-align:center; margin:20px 0 14px" class="muted">OPPURE</div>
+
+    <h2>Unisciti con un codice</h2>
+    <form id="joinForm">
+      <label for="joinName">Il tuo nome</label>
+      <input id="joinName" required maxlength="40" placeholder="Es. Alex">
+      <label for="inviteCode">Codice d'invito</label>
+      <input id="inviteCode" required maxlength="20" autocapitalize="characters" placeholder="Inserisci il codice">
+      <button id="joinButton" type="submit">Unisciti alla challenge</button>
+    </form>
+
+    <div id="challengeMessage" class="message" role="status"></div>
+    <div id="inviteResult" class="hidden">
+      <p class="muted">La challenge è stata creata! Condividi questo codice con il tuo partner:</p>
+      <div id="inviteDisplay" class="invite"></div>
+      <button id="copyInviteButton" type="button">Copia codice</button>
+    </div>
+  </section>
+
+  <footer>FIT TOGETHER · Your journey, together.</footer>
+</main>
+
+<script>
+  // INSERISCI QUI I DATI PUBBLICI DEL TUO PROGETTO SUPABASE
+  const SUPABASE_URL = "https://lnxvnqpuxqhedleecljh.supabase.co";
+  const SUPABASE_KEY = "sb_publishable_apZnTfVl3msE3HbvvcTdEw_MCtjOSJZ";
+
+  const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  const $ = (id) => document.getElementById(id);
+
+  function showMessage(id, message) {
+    const el = $(id);
+    el.textContent = message;
+    el.classList.add("show");
+  }
+
+  function setBusy(buttonId, busy, busyText) {
+    const button = $(buttonId);
+    if (busy) {
+      button.dataset.originalText = button.textContent;
+      button.textContent = busyText;
+      button.disabled = true;
+    } else {
+      button.textContent = button.dataset.originalText || button.textContent;
+      button.disabled = false;
+    }
+  }
+
+  function showLoggedIn(user) {
+    $("loginCard").classList.add("hidden");
+    $("challengeCard").classList.remove("hidden");
+    $("signedInEmail").textContent = user.email || "Account collegato";
+  }
+
+  function showLoggedOut() {
+    $("challengeCard").classList.add("hidden");
+    $("loginCard").classList.remove("hidden");
+    $("inviteResult").classList.add("hidden");
+  }
+
+  $("loginForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    $("loginMessage").classList.remove("show");
+    setBusy("loginButton", true, "Accesso in corso...");
+    const { data, error } = await client.auth.signInWithPassword({
+      email: $("email").value.trim(),
+      password: $("password").value
+    });
+    setBusy("loginButton", false);
+    if (error) {
+      showMessage("loginMessage", "Accesso non riuscito: " + error.message);
+      return;
+    }
+    showLoggedIn(data.user);
+  });
+
+  $("createForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    $("challengeMessage").classList.remove("show");
+    $("inviteResult").classList.add("hidden");
+    setBusy("createButton", true, "Creazione in corso...");
+    const { data, error } = await client.rpc("create_fit_challenge", {
+      p_display_name: $("createName").value.trim()
+    });
+    setBusy("createButton", false);
+
+    if (error) {
+      showMessage("challengeMessage", "Non è stato possibile creare la challenge: " + error.message);
+      return;
+    }
+
+    const result = Array.isArray(data) ? data[0] : data;
+    if (!result || !result.invite_code) {
+      showMessage("challengeMessage", "La challenge potrebbe essere stata creata, ma non ho ricevuto il codice. Controlliamo il risultato prima di riprovare.");
+      return;
+    }
+
+    $("inviteDisplay").textContent = result.invite_code;
+    $("inviteResult").classList.remove("hidden");
+    showMessage("challengeMessage", "Challenge creata correttamente!");
+  });
+
+  $("joinForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    $("challengeMessage").classList.remove("show");
+    setBusy("joinButton", true, "Accesso alla challenge...");
+    const { data, error } = await client.rpc("join_fit_challenge", {
+      p_invite_code: $("inviteCode").value.trim().toUpperCase(),
+      p_display_name: $("joinName").value.trim()
+    });
+    setBusy("joinButton", false);
+
+    if (error) {
+      showMessage("challengeMessage", "Non è stato possibile unirsi: " + error.message);
+      return;
+    }
+    showMessage("challengeMessage", "Ti sei unito alla challenge correttamente!");
+  });
+
+  $("copyInviteButton").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText($("inviteDisplay").textContent);
+      $("copyInviteButton").textContent = "Codice copiato!";
+    } catch {
+      showMessage("challengeMessage", "Seleziona e copia manualmente il codice qui sopra.");
+    }
+  });
+
+  $("logoutButton").addEventListener("click", async () => {
+    const { error } = await client.auth.signOut();
+    if (error) {
+      showMessage("challengeMessage", "Errore durante l'uscita: " + error.message);
+      return;
+    }
+    showLoggedOut();
+  });
+
+  client.auth.onAuthStateChange((_event, session) => {
+    if (session?.user) showLoggedIn(session.user);
+    else showLoggedOut();
+  });
+
+  client.auth.getSession().then(({ data }) => {
+    if (data.session?.user) showLoggedIn(data.session.user);
+    else showLoggedOut();
+  });
+</script>
+</body>
+</html>
