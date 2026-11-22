@@ -245,6 +245,108 @@
       cursor:not-allowed;
     }
 
+    .ft-review-list {
+      display:grid;
+      gap:14px;
+      margin-top:15px;
+    }
+
+    .ft-review-card {
+      border:1px solid var(--border);
+      border-radius:14px;
+      padding:13px;
+      display:grid;
+      gap:12px;
+    }
+
+    .ft-review-top {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+
+    .ft-review-title {
+      font-size:15px;
+      font-weight:750;
+    }
+
+    .ft-review-photo {
+      display:block;
+      width:100%;
+      max-height:300px;
+      object-fit:contain;
+      border-radius:10px;
+      background:var(--field);
+    }
+
+    .ft-review-photo-link {
+      display:block;
+      text-decoration:none;
+    }
+
+    .ft-review-details {
+      display:grid;
+      gap:6px;
+      font-size:13px;
+    }
+
+    .ft-review-detail {
+      color:var(--muted);
+    }
+
+    .ft-review-notes {
+      padding:10px;
+      border-radius:9px;
+      background:var(--field);
+      font-size:13px;
+      white-space:pre-wrap;
+      overflow-wrap:anywhere;
+    }
+
+    .ft-review-actions {
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:9px;
+    }
+
+    .ft-review-actions button {
+      width:100%;
+      margin:0;
+      padding:11px 8px;
+      border:0;
+      border-radius:10px;
+      font:inherit;
+      font-size:13px;
+      font-weight:750;
+      cursor:pointer;
+    }
+
+    .ft-approve-button {
+      background:#d9f5e9;
+      color:#16845f;
+    }
+
+    .ft-reject-button {
+      background:#ffe0e2;
+      color:#b23b45;
+    }
+
+    .ft-review-actions button:disabled {
+      opacity:.5;
+      cursor:not-allowed;
+    }
+
+    .ft-review-empty {
+      padding:14px;
+      border-radius:12px;
+      background:var(--field);
+      color:var(--muted);
+      font-size:13px;
+      line-height:1.5;
+    }
+
     @media (max-width:380px) {
       .ft-slot {
         gap:8px;
@@ -284,6 +386,15 @@
     const day = String(date.getDate()).padStart(2, "0");
 
     return `${year}-${month}-${day}`;
+  }
+
+  function formatDate(dateString) {
+    if (!dateString) return "Data non disponibile";
+
+    const parts = dateString.split("-");
+    if (parts.length !== 3) return dateString;
+
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
   }
 
   function getCurrentWeek() {
@@ -369,7 +480,6 @@
     );
 
     const status = latestEntry?.status || "empty";
-
     const detail = statusLabel(status);
 
     let action = "";
@@ -448,6 +558,21 @@
       { value: "swimming", label: "Nuoto" },
       { value: "other", label: "Altro sport" }
     ];
+  }
+
+  function activityLabel(activity) {
+    const labels = {
+      gym: "Palestra",
+      run: "Corsa",
+      trekking: "Trekking",
+      cycling: "Ciclismo",
+      skiing: "Sci",
+      beach_volley: "Beach volley",
+      swimming: "Nuoto",
+      other: "Altro sport"
+    };
+
+    return labels[activity] || activity || "Attività";
   }
 
   function showWorkoutForm(member, slotId) {
@@ -733,6 +858,192 @@
     }
   }
 
+  async function reviewWorkout(workoutId, approve, user) {
+    const actionButtons = document.querySelectorAll(
+      `[data-review-id="${workoutId}"]`
+    );
+
+    actionButtons.forEach(button => {
+      button.disabled = true;
+      button.textContent = "Attendere...";
+    });
+
+    try {
+      const { error } = await client.rpc("review_workout", {
+        p_workout_id: workoutId,
+        p_approve: approve
+      });
+
+      if (error) throw error;
+
+      await loadDashboard(user);
+
+    } catch (error) {
+      console.error("FIT TOGETHER review error:", error);
+
+      const message = document.getElementById(
+        `ftReviewMessage-${workoutId}`
+      );
+
+      if (message) {
+        message.textContent =
+          error.message || "Non è stato possibile completare la revisione.";
+
+        message.className = "ft-message error";
+      }
+
+      actionButtons.forEach(button => {
+        button.disabled = false;
+        button.textContent = button.dataset.originalLabel || "Riprova";
+      });
+    }
+  }
+
+  async function renderPendingReviews(pendingWorkouts, members, user) {
+    if (!pendingWorkouts.length) {
+      return `
+        <div class="ft-review-empty">
+          <strong>Non ci sono allenamenti da approvare.</strong>
+          <br>
+          Quando il partner invierà un allenamento, lo troverai qui.
+        </div>
+      `;
+    }
+
+    const memberMap = new Map(
+      members.map(member => [member.id, member])
+    );
+
+    const cards = await Promise.all(
+      pendingWorkouts.map(async workout => {
+        const member = memberMap.get(workout.member_id);
+        const memberName = member?.display_name || "Partner";
+
+        let photoHtml = `
+          <div class="ft-review-empty">
+            Foto di prova non disponibile.
+          </div>
+        `;
+
+        if (workout.proof_path) {
+          try {
+            const { data, error } = await client.storage
+              .from(BUCKET)
+              .createSignedUrl(workout.proof_path, 3600);
+
+            if (!error && data?.signedUrl) {
+              const safeUrl = escapeHtml(data.signedUrl);
+
+              photoHtml = `
+                <a class="ft-review-photo-link"
+                  href="${safeUrl}"
+                  target="_blank"
+                  rel="noopener noreferrer">
+
+                  <img
+                    class="ft-review-photo"
+                    src="${safeUrl}"
+                    alt="Foto di prova di ${escapeHtml(memberName)}"
+                    loading="lazy">
+                </a>
+              `;
+            } else {
+              console.error(
+                "FIT TOGETHER signed URL error:",
+                error
+              );
+            }
+          } catch (photoError) {
+            console.error(
+              "FIT TOGETHER photo error:",
+              photoError
+            );
+          }
+        }
+
+        const distanceHtml =
+          workout.distance_km !== null &&
+          workout.distance_km !== undefined
+            ? `<div class="ft-review-detail">Distanza: <strong>${escapeHtml(workout.distance_km)} km</strong></div>`
+            : "";
+
+        const notesHtml = workout.notes
+          ? `
+            <div class="ft-review-notes">
+              <strong>Note:</strong>
+              <br>
+              ${escapeHtml(workout.notes)}
+            </div>
+          `
+          : "";
+
+        return `
+          <div class="ft-review-card">
+
+            <div class="ft-review-top">
+              <div class="ft-review-title">
+                ${escapeHtml(memberName)}
+              </div>
+
+              <span class="ft-status pending">
+                Da approvare
+              </span>
+            </div>
+
+            <div class="ft-review-details">
+              <div>
+                Attività:
+                <strong>${escapeHtml(activityLabel(workout.activity_type))}</strong>
+              </div>
+
+              <div class="ft-review-detail">
+                Data: <strong>${escapeHtml(formatDate(workout.activity_date))}</strong>
+              </div>
+
+              <div class="ft-review-detail">
+                Durata: <strong>${escapeHtml(workout.duration_minutes)} minuti</strong>
+              </div>
+
+              ${distanceHtml}
+            </div>
+
+            ${photoHtml}
+
+            ${notesHtml}
+
+            <div id="ftReviewMessage-${workout.id}"
+              class="ft-message"
+              aria-live="polite">
+            </div>
+
+            <div class="ft-review-actions">
+              <button
+                type="button"
+                class="ft-approve-button"
+                data-review-id="${escapeHtml(workout.id)}"
+                data-original-label="✓ Approva"
+                data-review-action="approve">
+                ✓ Approva
+              </button>
+
+              <button
+                type="button"
+                class="ft-reject-button"
+                data-review-id="${escapeHtml(workout.id)}"
+                data-original-label="✕ Rifiuta"
+                data-review-action="reject">
+                ✕ Rifiuta
+              </button>
+            </div>
+
+          </div>
+        `;
+      })
+    );
+
+    return cards.join("");
+  }
+
   async function loadDashboard(user) {
     const container = document.getElementById("challengeCard");
 
@@ -789,7 +1100,11 @@
 
       const week = getCurrentWeek();
 
-      const [membersResult, workoutsResult] = await Promise.all([
+      const [
+        membersResult,
+        workoutsResult,
+        pendingResult
+      ] = await Promise.all([
 
         client
           .from("challenge_members")
@@ -813,15 +1128,37 @@
           .eq("challenge_id", ownMember.challenge_id)
           .gte("activity_date", week.start)
           .lte("activity_date", week.end)
-          .order("created_at", { ascending: false })
+          .order("created_at", { ascending: false }),
+
+        client
+          .from("workout_entries")
+          .select(`
+            id,
+            member_id,
+            session_slot,
+            activity_type,
+            activity_date,
+            duration_minutes,
+            distance_km,
+            notes,
+            proof_path,
+            status,
+            created_at
+          `)
+          .eq("challenge_id", ownMember.challenge_id)
+          .eq("status", "pending")
+          .neq("member_id", ownMember.id)
+          .order("created_at", { ascending: true })
 
       ]);
 
       if (membersResult.error) throw membersResult.error;
       if (workoutsResult.error) throw workoutsResult.error;
+      if (pendingResult.error) throw pendingResult.error;
 
       const members = membersResult.data || [];
       const workouts = workoutsResult.data || [];
+      const pendingWorkouts = pendingResult.data || [];
 
       const ownSlots = getPlanSlots(ownMember.weekly_plan);
 
@@ -873,6 +1210,12 @@
           </div>
         `;
       }).join("");
+
+      const pendingReviewsHtml = await renderPendingReviews(
+        pendingWorkouts,
+        members,
+        user
+      );
 
       container.innerHTML = `
         <div class="ft-dashboard">
@@ -931,6 +1274,28 @@
 
           <div class="ft-panel">
 
+            <div class="ft-review-top">
+              <h2 style="margin:0">
+                Allenamenti da approvare
+              </h2>
+
+              ${pendingWorkouts.length
+                ? `<span class="ft-status pending">${pendingWorkouts.length} in attesa</span>`
+                : ""}
+            </div>
+
+            <div class="ft-subtitle" style="margin-top:5px">
+              Qui trovi gli allenamenti inviati dal tuo partner.
+            </div>
+
+            <div class="ft-review-list">
+              ${pendingReviewsHtml}
+            </div>
+
+          </div>
+
+          <div class="ft-panel">
+
             <h2 style="margin:0 0 5px">
               La vostra sfida
             </h2>
@@ -950,6 +1315,15 @@
       container.querySelectorAll(".ft-load-button").forEach(button => {
         button.addEventListener("click", () => {
           showWorkoutForm(ownMember, button.dataset.slot);
+        });
+      });
+
+      container.querySelectorAll("[data-review-action]").forEach(button => {
+        button.addEventListener("click", () => {
+          const workoutId = button.dataset.reviewId;
+          const approve = button.dataset.reviewAction === "approve";
+
+          reviewWorkout(workoutId, approve, user);
         });
       });
 
