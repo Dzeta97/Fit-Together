@@ -76,6 +76,23 @@
     .ft-message { font-size:13px; line-height:1.5; }
     .ft-message.error { color:#c34a50; }
     .ft-message.success { color:#16845f; }
+
+    .ft-load-button {
+      width:auto; margin-top:8px; padding:8px 12px;
+      border:1px solid var(--border); border-radius:9px;
+      background:var(--field); color:var(--text);
+      font:inherit; font-size:12px; font-weight:700;
+      cursor:pointer;
+    }
+    .ft-back-button {
+      width:auto; padding:9px 12px; margin:0;
+      border:1px solid var(--border); border-radius:10px;
+      background:transparent; color:var(--text);
+      font:inherit; cursor:pointer;
+    }
+    .ft-fixed-activity {
+      opacity:.75; cursor:not-allowed;
+    }
   `;
 
   if (!document.getElementById("ft-dashboard-styles")) {
@@ -138,13 +155,30 @@
     return "Da completare";
   }
 
-  function renderSlot(slot, workouts) {
-    const entry = workouts.find(item => item.session_slot === slot.id);
-    const status = entry?.status || "empty";
+  function getActiveWorkout(slot, workouts) {
+    return workouts.find(item =>
+      item.session_slot === slot.id &&
+      (item.status === "approved" || item.status === "pending")
+    );
+  }
 
-    const detail = entry
-      ? `${entry.activity_date} · ${entry.duration_minutes} min${entry.distance_km ? ` · ${entry.distance_km} km` : ""}`
+  function renderSlot(slot, workouts) {
+    const activeEntry = getActiveWorkout(slot, workouts);
+    const latestEntry = activeEntry || workouts.find(
+      item => item.session_slot === slot.id
+    );
+
+    const status = latestEntry?.status || "empty";
+
+    const detail = latestEntry
+      ? `${latestEntry.activity_date} · ${latestEntry.duration_minutes} min${latestEntry.distance_km ? ` · ${latestEntry.distance_km} km` : ""}`
       : slot.description;
+
+    const action = activeEntry
+      ? `<span class="ft-status ${status}">${statusLabel(status)}</span>`
+      : `<button type="button" class="ft-load-button" data-slot="${slot.id}">
+           ${status === "rejected" ? "Riprova" : "Carica attività"}
+         </button>`;
 
     return `
       <div class="ft-slot">
@@ -152,8 +186,8 @@
         <div class="ft-slot-info">
           <div class="ft-slot-title">${escapeHtml(slot.title)}</div>
           <div class="ft-slot-detail">${escapeHtml(detail)}</div>
+          ${action}
         </div>
-        <span class="ft-status ${status}">${statusLabel(status)}</span>
       </div>
     `;
   }
@@ -172,22 +206,103 @@
       { value: "cycling", label: "Ciclismo" },
       { value: "skiing", label: "Sci" },
       { value: "gym", label: "Palestra" },
+      { value: "beach_volley", label: "Beach volley" },
+      { value: "run", label: "Corsa" },
+      { value: "swimming", label: "Nuoto" },
       { value: "other", label: "Altro sport" }
     ];
   }
 
-  function updateActivityOptions() {
-    const slot = document.getElementById("ftSessionSlot");
-    const activity = document.getElementById("ftActivityType");
+  function showWorkoutForm(member, slotId) {
+    const container = document.getElementById("challengeCard");
+    const week = getCurrentWeek();
+    const slots = getPlanSlots(member.weekly_plan);
+    const slot = slots.find(item => item.id === slotId);
 
-    if (!slot || !activity) return;
+    if (!slot) return;
 
-    activity.innerHTML = activityOptions(slot.value)
-      .map(item => `<option value="${item.value}">${item.label}</option>`)
-      .join("");
+    const options = activityOptions(slotId);
+    const isFixedActivity = options.length === 1;
+
+    container.innerHTML = `
+      <div class="ft-dashboard">
+        <div class="ft-toolbar">
+          <button type="button" class="ft-back-button" id="ftBackToDashboard">
+            ← Torna alla sfida
+          </button>
+          <div class="ft-small">FIT TOGETHER</div>
+        </div>
+
+        <div class="ft-panel">
+          <h1 class="ft-heading">Registra allenamento 💪</h1>
+          <div class="ft-subtitle">
+            Sessione: <strong>${escapeHtml(slot.title)}</strong>
+          </div>
+
+          <form id="ftWorkoutForm" class="ft-form">
+
+            <label>
+              <span class="ft-small">Tipo di attività</span>
+              <select id="ftActivityType" required
+                ${isFixedActivity ? "disabled class='ft-fixed-activity'" : ""}>
+                ${options.map(item =>
+                  `<option value="${item.value}">${item.label}</option>`
+                ).join("")}
+              </select>
+            </label>
+
+            <label>
+              <span class="ft-small">Data dell'attività</span>
+              <input id="ftActivityDate" type="date"
+                min="${week.start}" max="${week.today}"
+                value="${week.today}" required>
+            </label>
+
+            <label>
+              <span class="ft-small">Durata (minuti)</span>
+              <input id="ftDuration" type="number" min="1" max="1440"
+                required placeholder="Es. 60">
+            </label>
+
+            <label>
+              <span class="ft-small">Distanza (km) – facoltativa</span>
+              <input id="ftDistance" type="number" min="0" step="0.01"
+                placeholder="Es. 5.5">
+            </label>
+
+            <label>
+              <span class="ft-small">Note – facoltative</span>
+              <textarea id="ftNotes" rows="3" maxlength="1000"
+                placeholder="Aggiungi qualche dettaglio..."></textarea>
+            </label>
+
+            <label>
+              <span class="ft-small">Foto di prova (max 10 MB)</span>
+              <input id="ftProof" type="file"
+                accept="image/jpeg,image/png,image/webp,image/heic" required>
+            </label>
+
+            <button type="submit" id="ftSubmitWorkout">
+              Invia allenamento
+            </button>
+
+            <div id="ftWorkoutMessage" class="ft-message"
+              aria-live="polite"></div>
+          </form>
+        </div>
+      </div>
+    `;
+
+    document.getElementById("ftBackToDashboard")
+      .addEventListener("click", () => loadDashboard(member.user));
+
+    document.getElementById("ftWorkoutForm")
+      .addEventListener("submit", event =>
+        submitWorkout(event, member, slotId)
+      );
   }
 
-  async function submitWorkout(event, member) {
+  async function submitWorkout(event, member, slotId) {
     event.preventDefault();
 
     const form = event.currentTarget;
@@ -196,7 +311,7 @@
 
     if (!form || !button || !message) return;
 
-    const slot = document.getElementById("ftSessionSlot").value;
+    const slot = slotId;
     const activity = document.getElementById("ftActivityType").value;
     const date = document.getElementById("ftActivityDate").value;
     const duration = Number(document.getElementById("ftDuration").value);
@@ -207,7 +322,8 @@
     const week = getCurrentWeek();
 
     if (!date || date < week.start || date > week.today) {
-      message.textContent = "Seleziona una data compresa nella settimana corrente e non futura.";
+      message.textContent =
+        "Seleziona una data compresa nella settimana corrente e non futura.";
       message.className = "ft-message error";
       return;
     }
@@ -243,14 +359,16 @@
     ];
 
     if (!allowedTypes.includes(file.type)) {
-      message.textContent = "Formato non supportato. Usa JPEG, PNG, WEBP o HEIC.";
+      message.textContent =
+        "Formato non supportato. Usa JPEG, PNG, WEBP o HEIC.";
       message.className = "ft-message error";
       return;
     }
 
     button.disabled = true;
     button.textContent = "Invio in corso...";
-    message.textContent = "Caricamento della foto e registrazione dell'allenamento...";
+    message.textContent =
+      "Caricamento della foto e registrazione dell'allenamento...";
     message.className = "ft-message";
 
     let uploadedPath = null;
@@ -291,12 +409,6 @@
 
       if (insertError) throw insertError;
 
-      message.textContent = "Allenamento inviato! Ora è in attesa di approvazione del partner.";
-      message.className = "ft-message success";
-
-      form.reset();
-      updateActivityOptions();
-
       await loadDashboard(member.user);
 
     } catch (error) {
@@ -312,10 +424,10 @@
         }
       }
 
-      message.textContent = error.message || "Non è stato possibile inviare l'allenamento.";
+      message.textContent =
+        error.message || "Non è stato possibile inviare l'allenamento.";
       message.className = "ft-message error";
 
-    } finally {
       button.disabled = false;
       button.textContent = "Invia allenamento";
     }
@@ -350,7 +462,9 @@
         container.innerHTML = `
           <div class="ft-panel">
             <h2>Nessuna challenge trovata</h2>
-            <p class="ft-small">Non risulti ancora collegato a una challenge.</p>
+            <p class="ft-small">
+              Non risulti ancora collegato a una challenge.
+            </p>
             <button onclick="location.reload()">Torna all'accesso</button>
           </div>
         `;
@@ -383,17 +497,14 @@
       const members = membersResult.data || [];
       const workouts = workoutsResult.data || [];
       const ownSlots = getPlanSlots(ownMember.weekly_plan);
-      const ownWorkouts = workouts.filter(item => item.member_id === ownMember.id);
-
-      const activeOwnWorkouts = ownSlots.map(slot =>
-        ownWorkouts.find(item =>
-          item.session_slot === slot.id &&
-          (item.status === "approved" || item.status === "pending")
-        )
+      const ownWorkouts = workouts.filter(
+        item => item.member_id === ownMember.id
       );
 
-      const approvedCount = activeOwnWorkouts.filter(
-        item => item?.status === "approved"
+      const approvedCount = ownSlots.filter(slot =>
+        ownWorkouts.some(item =>
+          item.session_slot === slot.id && item.status === "approved"
+        )
       ).length;
 
       const progress = Math.round((approvedCount / 3) * 100);
@@ -403,7 +514,9 @@
 
       const memberSummary = members.map(member => {
         const slots = getPlanSlots(member.weekly_plan);
-        const memberEntries = workouts.filter(item => item.member_id === member.id);
+        const memberEntries = workouts.filter(
+          item => item.member_id === member.id
+        );
 
         const count = slots.filter(slot =>
           memberEntries.some(item =>
@@ -415,7 +528,11 @@
           <div class="ft-member">
             <div>
               <strong>${escapeHtml(member.display_name)}</strong>
-              <div class="ft-small">${member.weekly_plan === "runner" ? "2 palestre + corsa" : "2 palestre + sport libero"}</div>
+              <div class="ft-small">
+                ${member.weekly_plan === "runner"
+                  ? "2 palestre + corsa"
+                  : "2 palestre + sport libero"}
+              </div>
             </div>
             <strong>${count}/3</strong>
           </div>
@@ -430,7 +547,9 @@
           </div>
 
           <div class="ft-panel">
-            <h1 class="ft-heading">Ciao, ${escapeHtml(ownMember.display_name)}! 👋</h1>
+            <h1 class="ft-heading">
+              Ciao, ${escapeHtml(ownMember.display_name)}! 👋
+            </h1>
             <div class="ft-subtitle">La tua settimana · ${weekLabel}</div>
             <div class="ft-progress">
               <div class="ft-progress-fill" style="width:${progress}%"></div>
@@ -443,90 +562,38 @@
 
           <div class="ft-panel">
             <h2 style="margin:0 0 5px">I tuoi obiettivi</h2>
-            <div class="ft-subtitle">Completa tutte e tre le sessioni entro domenica.</div>
-            ${ownSlots.map(slot => renderSlot(slot, ownWorkouts)).join("")}
+            <div class="ft-subtitle">
+              Seleziona una sessione per caricare il tuo allenamento.
+            </div>
+            ${ownSlots.map(slot =>
+              renderSlot(slot, ownWorkouts)
+            ).join("")}
           </div>
 
           <div class="ft-panel">
             <h2 style="margin:0 0 5px">La vostra sfida</h2>
-            <div class="ft-subtitle">Progresso settimanale di entrambi</div>
-            ${memberSummary || '<p class="ft-small">Nessun partecipante trovato.</p>'}
-          </div>
-
-          <div class="ft-panel">
-            <h2 style="margin:0 0 5px">Registra un allenamento 💪</h2>
             <div class="ft-subtitle">
-              Inserisci la tua sessione e carica una prova fotografica.
+              Progresso settimanale di entrambi
             </div>
-
-            <form id="ftWorkoutForm" class="ft-form">
-
-              <label>
-                <span class="ft-small">Sessione settimanale</span>
-                <select id="ftSessionSlot" required>
-                  ${ownSlots.map(slot =>
-                    `<option value="${slot.id}">${escapeHtml(slot.title)}</option>`
-                  ).join("")}
-                </select>
-              </label>
-
-              <label>
-                <span class="ft-small">Tipo di attività</span>
-                <select id="ftActivityType" required></select>
-              </label>
-
-              <label>
-                <span class="ft-small">Data dell'attività</span>
-                <input id="ftActivityDate" type="date"
-                  min="${week.start}" max="${week.today}" value="${week.today}" required>
-              </label>
-
-              <label>
-                <span class="ft-small">Durata (minuti)</span>
-                <input id="ftDuration" type="number" min="1" max="1440"
-                  required placeholder="Es. 60">
-              </label>
-
-              <label>
-                <span class="ft-small">Distanza (km) – facoltativa</span>
-                <input id="ftDistance" type="number" min="0" step="0.01"
-                  placeholder="Es. 5.5">
-              </label>
-
-              <label>
-                <span class="ft-small">Note – facoltative</span>
-                <textarea id="ftNotes" rows="3" maxlength="1000"
-                  placeholder="Aggiungi qualche dettaglio..."></textarea>
-              </label>
-
-              <label>
-                <span class="ft-small">Foto di prova (max 10 MB)</span>
-                <input id="ftProof" type="file"
-                  accept="image/jpeg,image/png,image/webp,image/heic" required>
-              </label>
-
-              <button type="submit" id="ftSubmitWorkout">
-                Invia allenamento
-              </button>
-
-              <div id="ftWorkoutMessage" class="ft-message" aria-live="polite"></div>
-            </form>
+            ${memberSummary ||
+              '<p class="ft-small">Nessun partecipante trovato.</p>'}
           </div>
         </div>
       `;
 
-      updateActivityOptions();
-
-      document.getElementById("ftSessionSlot")
-        .addEventListener("change", updateActivityOptions);
-
-      document.getElementById("ftWorkoutForm")
-        .addEventListener("submit", event => submitWorkout(event, ownMember));
-
-      document.getElementById("ftLogout").addEventListener("click", async () => {
-        await client.auth.signOut();
-        location.reload();
+      container.querySelectorAll(".ft-load-button").forEach(button => {
+        button.addEventListener("click", () => {
+          showWorkoutForm(ownMember, button.dataset.slot);
+        });
       });
+
+      document.getElementById("ftLogout").addEventListener(
+        "click",
+        async () => {
+          await client.auth.signOut();
+          location.reload();
+        }
+      );
 
     } catch (error) {
       console.error("FIT TOGETHER dashboard error:", error);
@@ -534,7 +601,9 @@
       container.innerHTML = `
         <div class="ft-panel">
           <h2>Non riusciamo a caricare la dashboard</h2>
-          <p class="ft-error">${escapeHtml(error.message || "Errore sconosciuto")}</p>
+          <p class="ft-error">
+            ${escapeHtml(error.message || "Errore sconosciuto")}
+          </p>
           <button type="button" onclick="location.reload()">Riprova</button>
         </div>
       `;
@@ -553,4 +622,3 @@
     }
   });
 })();
-
