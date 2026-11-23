@@ -9,8 +9,6 @@
     console.error("FIT TOGETHER: Supabase client non trovato.");
     return;
   }
-const styles = `
-    .ft-dashboard { display:grid; gap:16px; }
 
     .ft-panel {
       background:var(--card);
