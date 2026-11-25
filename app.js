@@ -1188,7 +1188,7 @@
         client
           .from("notifications")
           .select("id, title, message, notification_type, workout_id, is_read, created_at")
-          .eq("recipient_id", ownMember.id)
+          .eq("recipient_id", user.id)
           .order("created_at", { ascending: false })
           .limit(20)
       ]);
