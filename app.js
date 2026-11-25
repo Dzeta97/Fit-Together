@@ -1219,10 +1219,12 @@
       }
 
       notificationRefreshTimer = setInterval(() => {
-        if (currentUser && !loading) {
-          loadDashboard(currentUser);
-        }
-      }, 30000);
+  const workoutFormOpen = document.getElementById("ftWorkoutForm");
+
+  if (currentUser && !loading && !workoutFormOpen) {
+    loadDashboard(currentUser);
+  }
+}, 30000);
 
     } catch (error) {
       console.error("FIT TOGETHER dashboard error:", error);
