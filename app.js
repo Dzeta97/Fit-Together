@@ -1,4 +1,3 @@
-
 (() => {
   "use strict";
 
@@ -24,6 +23,7 @@
   let currentUser = null;
   let currentMember = null;
   let currentChallenge = null;
+  let currentView = "home";
 
   // --------------------------------------------------
   // UTILITIES
@@ -464,6 +464,57 @@
         flex-wrap:wrap;
       }
 
+      .ft-menu-area {
+        position:relative;
+      }
+
+      .ft-menu-button {
+        border:1px solid var(--border-color, #d5dbe2);
+        background:transparent;
+        color:inherit;
+        border-radius:11px;
+        padding:10px 13px;
+        cursor:pointer;
+        font-size:19px;
+      }
+
+      .ft-menu-panel {
+        position:absolute;
+        z-index:20;
+        top:calc(100% + 8px);
+        left:0;
+        min-width:175px;
+        padding:7px;
+        background:var(--card-bg, #fff);
+        border:1px solid var(--border-color, #d5dbe2);
+        border-radius:12px;
+        box-shadow:0 8px 24px rgba(0,0,0,.12);
+      }
+
+      .ft-menu-item {
+        display:block;
+        width:100%;
+        padding:11px 12px;
+        border:0;
+        border-radius:8px;
+        background:transparent;
+        color:inherit;
+        text-align:left;
+        font:inherit;
+        cursor:pointer;
+      }
+
+      .ft-menu-item:hover,
+      .ft-menu-item.active {
+        background:var(--border-color, #edf0f3);
+      }
+
+      .ft-page-title {
+        margin:0;
+        font-size:23px;
+        font-weight:750;
+      }
+
       .ft-hidden {
         display:none !important;
       }
@@ -826,50 +877,36 @@
 
   function renderNotifications(notifications) {
     if (!notifications.length) {
-      return `<p class="ft-message">Nessuna notifica.</p>`;
+      return `<p class="ft-message">Non hai nuove notifiche.</p>`;
     }
 
     return notifications.map(notification => `
-      <div class="ft-notification-item ${notification.is_read ? "" : "unread"}">
+      <button
+        type="button"
+        class="ft-notification-item unread"
+        style="display:block;width:100%;text-align:left;background:transparent;color:inherit;border:0;cursor:pointer;font:inherit;"
+        data-action="open-notification"
+        data-id="${escapeHtml(notification.id)}"
+        data-type="${escapeHtml(notification.notification_type)}"
+        data-workout-id="${escapeHtml(notification.workout_id || "") }"
+      >
         <div>${escapeHtml(notification.title || "Notifica")}</div>
-
         <p style="margin:5px 0;">
           ${escapeHtml(notification.message || "")}
         </p>
-
         <div class="ft-small">
-          ${formatDateTime(notification.created_at)}
-          ${notification.is_read ? "" : " · Nuova"}
+          ${formatDateTime(notification.created_at)} · Nuova · Tocca per aprire
         </div>
-
-        ${!notification.is_read ? `
-          <button
-            class="ft-button ft-secondary"
-            style="margin-top:7px;padding:6px 9px;"
-            data-action="read-notification"
-            data-id="${escapeHtml(notification.id)}"
-          >
-            Segna come letta
-          </button>
-        ` : ""}
-      </div>
+      </button>
     `).join("");
   }
 
   async function markNotificationRead(notificationId) {
-    try {
-      const { error } = await client.rpc("mark_notification_read", {
-        p_notification_id: notificationId
-      });
+    const { error } = await client.rpc("mark_notification_read", {
+      p_notification_id: notificationId
+    });
 
-      if (error) throw error;
-
-      await loadDashboard(currentUser);
-
-    } catch (error) {
-      console.error("FIT TOGETHER notification error:", error);
-      alert("Errore durante l'aggiornamento della notifica: " + error.message);
-    }
+    if (error) throw error;
   }
 
   // --------------------------------------------------
@@ -895,70 +932,44 @@
     });
 
     const approvedCount = workoutCounts[ownMember.id] || 0;
-    const unreadCount = notifications.filter(item => !item.is_read).length;
+    const unreadCount = notifications.length;
 
     const memberCards = members.map(member => {
       const count = workoutCounts[member.id] || 0;
       const progress = Math.min(count, 3);
       const percentage = (progress / 3) * 100;
-
       const plan = member.weekly_plan === "runner"
         ? "2 palestre + corsa"
         : "2 palestre + sport libero";
-
       const isYou = member.id === ownMember.id;
 
       return `
         <div class="ft-panel">
           <div class="ft-member-name">
-            <h3 style="margin:0;font-size:19px;">
-              ${escapeHtml(member.display_name)}
-            </h3>
-
-            <span class="ft-status approved">
-              ${isYou ? "TU" : "PARTNER"}
-            </span>
+            <h3 style="margin:0;font-size:19px;">${escapeHtml(member.display_name)}</h3>
+            <span class="ft-status approved">${isYou ? "TU" : "PARTNER"}</span>
           </div>
-
           <p class="ft-subtitle">${escapeHtml(plan)}</p>
-
-          <div style="
-            display:flex;
-            justify-content:space-between;
-            align-items:center;
-            margin-top:18px;
-          ">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:18px;">
             <strong>Progresso settimanale</strong>
             <strong style="font-size:20px;">${count}/3</strong>
           </div>
-
-          <div class="ft-progress">
-            <div class="ft-progress-fill" style="width:${percentage}%;"></div>
-          </div>
-
+          <div class="ft-progress"><div class="ft-progress-fill" style="width:${percentage}%;"></div></div>
           <p class="ft-subtitle">
-            ${count >= 3
-              ? "Obiettivo settimanale raggiunto!"
-              : `Ancora ${3 - count} allenamenti approvati`}
+            ${count >= 3 ? "Obiettivo settimanale raggiunto!" : `Ancora ${3 - count} allenamenti approvati`}
           </p>
         </div>
       `;
     }).join("");
 
     const ownSlots = getPlanSlots(ownMember.weekly_plan);
-
     const slotsHtml = ownSlots.map(slot => {
       const workout = getSlotWorkout(
         workouts.filter(item => item.member_id === ownMember.id),
         slot.id
       );
-
       const status = workout?.status || null;
-
-      const displayStatus = !workout
-        ? "Da caricare"
-        : statusLabel(status);
-
+      const displayStatus = !workout ? "Da caricare" : statusLabel(status);
       let actionHtml = "";
 
       if (status === "approved") {
@@ -967,11 +978,7 @@
         actionHtml = `<span class="ft-status pending">In approvazione</span>`;
       } else {
         actionHtml = `
-          <button
-            class="ft-button ft-primary"
-            data-action="upload"
-            data-slot="${slot.id}"
-          >
+          <button class="ft-button ft-primary" data-action="upload" data-slot="${slot.id}">
             ${status === "rejected" ? "Riprova" : "Carica"}
           </button>
         `;
@@ -980,130 +987,96 @@
       return `
         <div class="ft-slot">
           <div class="ft-slot-icon">${slot.icon}</div>
-
           <div class="ft-slot-info">
             <p class="ft-slot-title">${escapeHtml(slot.title)}</p>
-
-            <p class="ft-slot-detail">
-              ${escapeHtml(displayStatus)}
-            </p>
+            <p class="ft-slot-detail">${escapeHtml(displayStatus)}</p>
           </div>
-
           ${actionHtml}
         </div>
       `;
     }).join("");
 
-    const pendingHtml = await renderPendingReviews(
-      pendingWorkouts,
-      members
-    );
+    let pageContent = "";
+
+    if (currentView === "reviews") {
+      const pendingHtml = await renderPendingReviews(pendingWorkouts, members);
+      pageContent = `
+        <div class="ft-panel">
+          <div class="ft-toolbar">
+            <div>
+              <h2 class="ft-page-title">Reviews</h2>
+              <p class="ft-subtitle">Controlla gli allenamenti caricati dal tuo partner.</p>
+            </div>
+            <span class="ft-status ${pendingWorkouts.length ? "pending" : "approved"}">
+              ${pendingWorkouts.length} da revisionare
+            </span>
+          </div>
+          ${pendingHtml}
+        </div>
+      `;
+    } else {
+      pageContent = `
+        <div class="ft-panel">
+          <h3 style="margin:0 0 7px;">La vostra settimana</h3>
+          <p class="ft-subtitle">${formatDate(week.start)} – ${formatDate(week.end)}</p>
+          <p style="margin:13px 0 0;">Ogni partecipante deve completare 3 allenamenti approvati.</p>
+          <div style="margin-top:14px;">
+            <strong>Il tuo progresso: ${approvedCount}/3</strong>
+            <div class="ft-progress"><div class="ft-progress-fill" style="width:${Math.min(approvedCount, 3) / 3 * 100}%;"></div></div>
+          </div>
+        </div>
+
+        <div>
+          <h3 class="ft-heading" style="font-size:19px;">I tuoi obiettivi</h3>
+          <p class="ft-subtitle">Carica i tuoi allenamenti e attendi l'approvazione del partner.</p>
+          ${slotsHtml}
+        </div>
+
+        <div>
+          <h3 class="ft-heading" style="font-size:19px;">Progresso di entrambi</h3>
+          <div class="ft-member-grid" style="margin-top:12px;">${memberCards}</div>
+        </div>
+      `;
+    }
 
     challengeCard.innerHTML = `
       <div class="ft-dashboard">
-
         <div class="ft-toolbar">
           <div>
             <p class="ft-subtitle">LA VOSTRA SFIDA</p>
-            <h2 class="ft-heading">
-              ${escapeHtml(challenge.name || "FIT TOGETHER")}
-            </h2>
-            <p class="ft-subtitle">
-              Ciao ${escapeHtml(ownMember.display_name)}!
-            </p>
+            <h2 class="ft-heading">${escapeHtml(challenge.name || "FIT TOGETHER")}</h2>
+            <p class="ft-subtitle">Ciao ${escapeHtml(ownMember.display_name)}!</p>
           </div>
 
           <div style="display:flex;gap:9px;align-items:center;">
+            <div class="ft-menu-area">
+              <button class="ft-menu-button" data-action="toggle-menu" aria-label="Apri menu" aria-expanded="false">☰</button>
+              <div id="ftMenu" class="ft-menu-panel ft-hidden">
+                <button class="ft-menu-item ${currentView === "home" ? "active" : ""}" data-action="nav-home">⌂ Homepage</button>
+                <button class="ft-menu-item ${currentView === "reviews" ? "active" : ""}" data-action="nav-reviews">✓ Reviews${pendingWorkouts.length ? ` (${pendingWorkouts.length})` : ""}</button>
+              </div>
+            </div>
+
             <div class="ft-notification-area">
-              <button
-                class="ft-bell-button"
-                data-action="toggle-notifications"
-                aria-label="Notifiche"
-              >
+              <button class="ft-bell-button" data-action="toggle-notifications" aria-label="Notifiche">
                 🔔
-                ${unreadCount ? `
-                  <span class="ft-bell-count">${unreadCount}</span>
-                ` : ""}
+                ${unreadCount ? `<span class="ft-bell-count">${unreadCount}</span>` : ""}
               </button>
             </div>
 
-            <button class="ft-button ft-secondary" data-action="logout">
-              Esci
-            </button>
+            <button class="ft-button ft-secondary" data-action="logout">Esci</button>
           </div>
         </div>
 
         <div id="ftNotifications" class="ft-panel ft-hidden">
           <div class="ft-toolbar">
-            <h3 style="margin:0;">Notifiche</h3>
-            <button
-              class="ft-button ft-secondary"
-              data-action="refresh"
-            >
-              Aggiorna
-            </button>
+            <h3 style="margin:0;">Nuove notifiche</h3>
+            <button class="ft-button ft-secondary" data-action="refresh">Aggiorna</button>
           </div>
-
           ${renderNotifications(notifications)}
         </div>
 
-        <div class="ft-panel">
-          <h3 style="margin:0 0 7px;">La vostra settimana</h3>
-
-          <p class="ft-subtitle">
-            ${formatDate(week.start)} – ${formatDate(week.end)}
-          </p>
-
-          <p style="margin:13px 0 0;">
-            Ogni partecipante deve completare 3 allenamenti approvati.
-          </p>
-
-          <div style="margin-top:14px;">
-            <strong>Il tuo progresso: ${approvedCount}/3</strong>
-
-            <div class="ft-progress">
-              <div
-                class="ft-progress-fill"
-                style="width:${Math.min(approvedCount, 3) / 3 * 100}%;"
-              ></div>
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <h3 class="ft-heading" style="font-size:19px;">
-            I tuoi obiettivi
-          </h3>
-
-          <p class="ft-subtitle">
-            Carica i tuoi allenamenti e attendi l'approvazione del partner.
-          </p>
-
-          ${slotsHtml}
-        </div>
-
-        <div>
-          <h3 class="ft-heading" style="font-size:19px;">
-            Da revisionare
-          </h3>
-
-          <p class="ft-subtitle">
-            Approva o rifiuta gli allenamenti caricati dal partner.
-          </p>
-
-          ${pendingHtml}
-        </div>
-
-        <div>
-          <h3 class="ft-heading" style="font-size:19px;">
-            Progresso di entrambi
-          </h3>
-
-          <div class="ft-member-grid" style="margin-top:12px;">
-            ${memberCards}
-          </div>
-        </div>
-
+        ${pageContent}
       </div>
     `;
   }
@@ -1189,6 +1162,7 @@
           .from("notifications")
           .select("id, title, message, notification_type, workout_id, is_read, created_at")
           .eq("recipient_id", user.id)
+          .eq("is_read", false)
           .order("created_at", { ascending: false })
           .limit(20)
       ]);
@@ -1219,12 +1193,12 @@
       }
 
       notificationRefreshTimer = setInterval(() => {
-  const workoutFormOpen = document.getElementById("ftWorkoutForm");
+        const workoutFormOpen = document.getElementById("ftWorkoutForm");
 
-  if (currentUser && !loading && !workoutFormOpen) {
-    loadDashboard(currentUser);
-  }
-}, 30000);
+        if (currentUser && !loading && !workoutFormOpen) {
+          loadDashboard(currentUser);
+        }
+      }, 30000);
 
     } catch (error) {
       console.error("FIT TOGETHER dashboard error:", error);
@@ -1248,6 +1222,39 @@
     if (!button) return;
 
     const action = button.dataset.action;
+
+    if (action === "toggle-menu") {
+      const menu = document.getElementById("ftMenu");
+      if (menu) {
+        menu.classList.toggle("ft-hidden");
+        button.setAttribute("aria-expanded", String(!menu.classList.contains("ft-hidden")));
+      }
+      return;
+    }
+
+    if (action === "nav-home") {
+      currentView = "home";
+      await loadDashboard(currentUser);
+      return;
+    }
+
+    if (action === "nav-reviews") {
+      currentView = "reviews";
+      await loadDashboard(currentUser);
+      return;
+    }
+
+    if (action === "open-notification") {
+      try {
+        await markNotificationRead(button.dataset.id);
+        currentView = "reviews";
+        await loadDashboard(currentUser);
+      } catch (error) {
+        console.error("FIT TOGETHER notification error:", error);
+        alert("Errore durante l'apertura della notifica: " + error.message);
+      }
+      return;
+    }
 
     if (action === "logout") {
       const { error } = await client.auth.signOut();
@@ -1289,10 +1296,6 @@
       await reviewWorkout(button.dataset.id, false);
     }
 
-    if (action === "read-notification") {
-      await markNotificationRead(button.dataset.id);
-    }
-
     if (action === "toggle-notifications") {
       const panel = document.getElementById("ftNotifications");
 
@@ -1312,6 +1315,7 @@
     if (session?.user) {
       setTimeout(() => loadDashboard(session.user), 0);
     } else {
+      currentView = "home";
       if (notificationRefreshTimer) {
         clearInterval(notificationRefreshTimer);
         notificationRefreshTimer = null;
