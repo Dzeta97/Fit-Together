@@ -719,71 +719,23 @@
         margin-top:18px;
       }
 
-            /* Contenitore esterno: larghezza limitata all'app */
-      .ft-panel:has(#ftTimelineScroll) {
-        width:100%;
-        max-width:100%;
-        min-width:0;
-        box-sizing:border-box;
-        overflow:hidden;
-      }
-
-      /* Barra orizzontale che contiene mesi e settimane */
-      .ft-timeline-scroll {
-        display:block;
-        width:100%;
-        max-width:100%;
-        min-width:0;
-        box-sizing:border-box;
-        overflow-x:auto;
-        overflow-y:hidden;
-        padding-bottom:10px;
-        -webkit-overflow-scrolling:touch;
-        overscroll-behavior-x:contain;
-        touch-action:pan-x;
-        scrollbar-width:auto;
-        scrollbar-color:#89949f #e8edf0;
-      }
-
-      .ft-timeline-scroll::-webkit-scrollbar {
-        height:8px;
-      }
-
-      .ft-timeline-scroll::-webkit-scrollbar-track {
-        background:#e8edf0;
-        border-radius:10px;
-      }
-
-      .ft-timeline-scroll::-webkit-scrollbar-thumb {
-        background:#89949f;
-        border-radius:10px;
-      }
-
-      .ft-timeline-content {
-        width:max-content;
-        min-width:100%;
-      }
-
-      /* Nomi dei mesi */
       .ft-timeline-months {
         display:grid;
         grid-template-columns:repeat(12,minmax(0,1fr));
         gap:2px;
         margin:18px 0 5px;
         color:var(--text-muted,#718096);
-        font-size:10px;
+        font-size:9px;
         text-align:center;
       }
 
-      /* Settimane sempre su un'unica riga */
       .ft-week-timeline {
         display:flex;
-        flex-wrap:nowrap;
-        width:max-content;
-        min-width:100%;
         gap:7px;
-        box-sizing:border-box;
+        overflow-x:auto;
         padding:8px 2px 14px;
+        scroll-snap-type:x mandatory;
+        -webkit-overflow-scrolling:touch;
       }
 
       .ft-week-chip {
@@ -1789,40 +1741,34 @@
             b.activity_date.localeCompare(a.activity_date)
           );
 
-                historyBody = `
-          <div class="ft-timeline-scroll" id="ftTimelineScroll">
-            <div class="ft-timeline-content">
+        historyBody = `
+          <div class="ft-timeline-months">
+            ${monthNames.map(name => `
+              <span>${name.slice(0, 3)}</span>
+            `).join("")}
+          </div>
 
-              <div class="ft-timeline-months">
-                ${monthNames.map(name => `
-                  <span>${name.slice(0, 3)}</span>
-                `).join("")}
-              </div>
+          <div class="ft-week-timeline" id="ftWeekTimeline">
+            ${timelineWeeks.map(item => {
+              const startDate = new Date(`${item.start}T12:00:00`);
+              const endDate = new Date(`${item.end}T12:00:00`);
 
-              <div class="ft-week-timeline" id="ftWeekTimeline">
-                ${timelineWeeks.map(item => {
-                  const startDate = new Date(`${item.start}T12:00:00`);
-                  const endDate = new Date(`${item.end}T12:00:00`);
+              const dateLabel =
+                `${startDate.getDate()} ${monthNames[startDate.getMonth()].slice(0, 3)}`
+                + ` – ${endDate.getDate()} ${monthNames[endDate.getMonth()].slice(0, 3)}`;
 
-                  const dateLabel =
-                    `${startDate.getDate()} ${monthNames[startDate.getMonth()].slice(0, 3)}`
-                    + ` – ${endDate.getDate()} ${monthNames[endDate.getMonth()].slice(0, 3)}`;
-
-                  return `
-                    <button
-                      class="ft-week-chip ${item.week === selectedTimelineWeek ? "active" : ""}"
-                      data-action="history-week"
-                      data-week="${item.week}"
-                      data-year="${timelineYear}"
-                    >
-                      <strong>CW${item.week}</strong>
-                      <span>${dateLabel}</span>
-                    </button>
-                  `;
-                }).join("")}
-              </div>
-
-            </div>
+              return `
+                <button
+                  class="ft-week-chip ${item.week === selectedTimelineWeek ? "active" : ""}"
+                  data-action="history-week"
+                  data-week="${item.week}"
+                  data-year="${timelineYear}"
+                >
+                  <strong>CW${item.week}</strong>
+                  <span>${dateLabel}</span>
+                </button>
+              `;
+            }).join("")}
           </div>
 
           <h3 style="margin:8px 0 12px;">
@@ -1842,6 +1788,7 @@
               </div>
             `}
         `;
+      }
 
       pageContent = `
         <div class="ft-panel">
@@ -2166,7 +2113,23 @@
 
       </div>
     `;
-    
+
+    // Porta la settimana selezionata al centro della Timeline.
+    if (currentView === "history" && historyMode === "timeline") {
+      requestAnimationFrame(() => {
+        const activeWeek = challengeCard.querySelector(
+          ".ft-week-chip.active"
+        );
+
+        if (activeWeek) {
+          activeWeek.scrollIntoView({
+            behavior: "smooth",
+            block: "nearest",
+            inline: "center"
+          });
+        }
+      });
+    }
   }
 
   // --------------------------------------------------
