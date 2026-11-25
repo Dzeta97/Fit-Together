@@ -24,6 +24,7 @@
   let currentMember = null;
   let currentChallenge = null;
   let currentView = "home";
+  let selectedWorkoutId = null;
 
   // --------------------------------------------------
   // UTILITIES
@@ -157,7 +158,7 @@
   function statusLabel(status) {
     const labels = {
       approved: "Approvato",
-      pending: "In approvazione",
+      pending: "Caricata · In attesa di approvazione",
       rejected: "Rifiutato"
     };
 
@@ -168,6 +169,17 @@
     return workouts
       .filter(workout => workout.session_slot === slotId)
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+  }
+
+  function isReviewNotification(notification) {
+    const type = String(notification.notification_type || "").toLowerCase();
+
+    return [
+      "workout_submitted",
+      "workout_pending_review",
+      "review_required",
+      "workout_to_review"
+    ].includes(type);
   }
 
   // --------------------------------------------------
@@ -230,6 +242,16 @@
         border-radius:14px;
         margin-top:10px;
         min-width:0;
+      }
+
+      .ft-slot.clickable {
+        cursor:pointer;
+        transition:background .2s ease, border-color .2s ease;
+      }
+
+      .ft-slot.clickable:hover {
+        border-color:#30b58b;
+        background:rgba(48,181,139,.06);
       }
 
       .ft-slot-icon {
@@ -308,6 +330,11 @@
         color:inherit;
       }
 
+      .ft-danger {
+        background:#b42332;
+        color:white;
+      }
+
       .ft-button:disabled {
         opacity:.5;
         cursor:not-allowed;
@@ -377,16 +404,6 @@
         margin-top:14px;
       }
 
-      .ft-approve-button {
-        background:#168b68;
-        color:white;
-      }
-
-      .ft-reject-button {
-        background:#b42332;
-        color:white;
-      }
-
       .ft-notification-area {
         position:relative;
       }
@@ -415,13 +432,6 @@
         align-items:center;
         justify-content:center;
         padding:0 3px;
-      }
-
-      .ft-notification-panel {
-        border:1px solid var(--border-color, #e1e5eb);
-        border-radius:13px;
-        padding:13px;
-        margin-top:10px;
       }
 
       .ft-notification-item {
@@ -464,6 +474,13 @@
         flex-wrap:wrap;
       }
 
+      .ft-toolbar-right {
+        display:flex;
+        align-items:center;
+        gap:9px;
+        margin-left:auto;
+      }
+
       .ft-menu-area {
         position:relative;
       }
@@ -482,8 +499,9 @@
         position:absolute;
         z-index:20;
         top:calc(100% + 8px);
-        left:0;
-        min-width:175px;
+        right:0;
+        left:auto;
+        min-width:185px;
         padding:7px;
         background:var(--card-bg, #fff);
         border:1px solid var(--border-color, #d5dbe2);
@@ -509,10 +527,48 @@
         background:var(--border-color, #edf0f3);
       }
 
+      .ft-menu-divider {
+        height:1px;
+        background:var(--border-color, #e1e5eb);
+        margin:6px 4px;
+      }
+
       .ft-page-title {
         margin:0;
         font-size:23px;
         font-weight:750;
+      }
+
+      .ft-detail-row {
+        display:flex;
+        justify-content:space-between;
+        gap:15px;
+        padding:13px 0;
+        border-bottom:1px solid var(--border-color, #e1e5eb);
+      }
+
+      .ft-detail-row:last-child {
+        border-bottom:0;
+      }
+
+      .ft-detail-label {
+        color:var(--text-muted, #718096);
+        font-size:13px;
+      }
+
+      .ft-detail-value {
+        font-size:14px;
+        font-weight:650;
+        text-align:right;
+      }
+
+      .ft-detail-photo {
+        width:100%;
+        max-height:450px;
+        object-fit:contain;
+        border-radius:12px;
+        margin-top:15px;
+        background:rgba(0,0,0,.04);
       }
 
       .ft-hidden {
@@ -581,16 +637,8 @@
             ` : `
               <label>
                 Tipo di attività
-                <input
-                  type="text"
-                  value="${escapeHtml(fixedActivityLabel)}"
-                  disabled
-                >
-                <input
-                  type="hidden"
-                  name="activity_type"
-                  value="${fixedActivityType}"
-                >
+                <input type="text" value="${escapeHtml(fixedActivityLabel)}" disabled>
+                <input type="hidden" name="activity_type" value="${fixedActivityType}">
               </label>
             `}
 
@@ -760,6 +808,8 @@
       if (insertError) throw insertError;
 
       alert("Allenamento caricato! Ora il tuo partner deve approvarlo.");
+      selectedWorkoutId = null;
+      currentView = "home";
       await loadDashboard(currentUser);
 
     } catch (error) {
@@ -772,6 +822,189 @@
       errorBox.textContent = error.message || "Errore durante il caricamento.";
       button.disabled = false;
       button.textContent = "Carica allenamento";
+    }
+  }
+
+  // --------------------------------------------------
+  // WORKOUT DETAILS
+  // --------------------------------------------------
+
+  async function renderWorkoutDetails(workout) {
+    const member = currentMember;
+    const isOwnWorkout = workout.member_id === member.id;
+    const canDelete = isOwnWorkout && workout.status === "pending";
+
+    let photoUrl = null;
+
+    if (workout.proof_path) {
+      const { data, error } = await client.storage
+        .from(BUCKET)
+        .createSignedUrl(workout.proof_path, 3600);
+
+      if (error) {
+        console.error("FIT TOGETHER photo error:", error);
+      } else {
+        photoUrl = data?.signedUrl || null;
+      }
+    }
+
+    challengeCard.innerHTML = `
+      <div class="ft-dashboard">
+        <div class="ft-panel">
+
+          <button class="ft-button ft-secondary" data-action="back">
+            ← Torna alla dashboard
+          </button>
+
+          <h2 class="ft-heading" style="margin-top:18px;">
+            Dettagli attività
+          </h2>
+
+          <p class="ft-subtitle">
+            Riepilogo dell'allenamento caricato.
+          </p>
+
+          <div style="margin-top:20px;">
+            <div class="ft-detail-row">
+              <span class="ft-detail-label">Attività</span>
+              <span class="ft-detail-value">${escapeHtml(activityLabel(workout.activity_type))}</span>
+            </div>
+
+            <div class="ft-detail-row">
+              <span class="ft-detail-label">Data</span>
+              <span class="ft-detail-value">${formatDate(workout.activity_date)}</span>
+            </div>
+
+            <div class="ft-detail-row">
+              <span class="ft-detail-label">Durata</span>
+              <span class="ft-detail-value">${Number(workout.duration_minutes || 0)} minuti</span>
+            </div>
+
+            <div class="ft-detail-row">
+              <span class="ft-detail-label">Distanza</span>
+              <span class="ft-detail-value">
+                ${workout.distance_km !== null && workout.distance_km !== undefined
+                  ? `${Number(workout.distance_km)} km`
+                  : "Non indicata"}
+              </span>
+            </div>
+
+            <div class="ft-detail-row">
+              <span class="ft-detail-label">Stato</span>
+              <span class="ft-detail-value">
+                <span class="ft-status ${escapeHtml(workout.status)}">
+                  ${escapeHtml(statusLabel(workout.status))}
+                </span>
+              </span>
+            </div>
+
+            <div class="ft-detail-row">
+              <span class="ft-detail-label">Caricamento</span>
+              <span class="ft-detail-value">${formatDateTime(workout.created_at)}</span>
+            </div>
+          </div>
+
+          <h3 style="margin:22px 0 8px;">Note</h3>
+          <p class="ft-message">
+            ${workout.notes
+              ? escapeHtml(workout.notes)
+              : "Nessuna nota aggiunta."}
+          </p>
+
+          <h3 style="margin:22px 0 8px;">Foto di prova</h3>
+
+          ${photoUrl ? `
+            <a href="${escapeHtml(photoUrl)}" target="_blank" rel="noopener">
+              <img
+                class="ft-detail-photo"
+                src="${escapeHtml(photoUrl)}"
+                alt="Foto di prova dell'allenamento"
+              >
+            </a>
+            <p class="ft-small">Tocca la foto per aprirla a dimensione originale.</p>
+          ` : `
+            <p class="ft-error">Foto non disponibile.</p>
+          `}
+
+          ${canDelete ? `
+            <div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--border-color,#e1e5eb);">
+              <h3 style="margin:0 0 8px;">Elimina attività</h3>
+
+              <p class="ft-message">
+                Eliminando questa attività verranno cancellati anche i dati e la foto caricata.
+                Lo slot tornerà disponibile e potrai caricare un nuovo allenamento.
+              </p>
+
+              <button
+                class="ft-button ft-danger"
+                style="width:100%;margin-top:10px;"
+                data-action="delete-workout"
+                data-id="${escapeHtml(workout.id)}"
+              >
+                Elimina attività
+              </button>
+            </div>
+          ` : `
+            <p class="ft-message" style="margin-top:25px;">
+              ${workout.status === "approved"
+                ? "Questo allenamento è già stato approvato e non può essere eliminato da questa schermata."
+                : "Questa attività non può essere eliminata da questa schermata."}
+            </p>
+          `}
+        </div>
+      </div>
+    `;
+  }
+
+  async function deleteWorkout(workoutId) {
+    if (!confirm(
+      "Vuoi davvero eliminare questo allenamento?\n\nI dati e la foto saranno cancellati e lo slot tornerà disponibile."
+    )) {
+      return;
+    }
+
+    try {
+      const { data: deletedRows, error } = await client
+        .from("workout_entries")
+        .delete()
+        .eq("id", workoutId)
+        .eq("member_id", currentMember.id)
+        .eq("status", "pending")
+        .select("id, proof_path");
+
+      if (error) throw error;
+
+      if (!deletedRows || deletedRows.length === 0) {
+        throw new Error(
+          "Non è stato possibile eliminare l'attività. Verifica che sia ancora in attesa di approvazione."
+        );
+      }
+
+      const proofPath = deletedRows[0].proof_path;
+
+      if (proofPath) {
+        const { error: storageError } = await client.storage
+          .from(BUCKET)
+          .remove([proofPath]);
+
+        if (storageError) {
+          console.error(
+            "FIT TOGETHER: attività eliminata, ma errore nella cancellazione della foto:",
+            storageError
+          );
+        }
+      }
+
+      alert("Attività eliminata. Ora puoi caricare un nuovo allenamento.");
+
+      selectedWorkoutId = null;
+      currentView = "home";
+
+      await loadDashboard(currentUser);
+
+    } catch (error) {
+      console.error("FIT TOGETHER delete workout error:", error);
+      alert("Errore durante l'eliminazione: " + error.message);
     }
   }
 
@@ -888,12 +1121,13 @@
         data-action="open-notification"
         data-id="${escapeHtml(notification.id)}"
         data-type="${escapeHtml(notification.notification_type)}"
-        data-workout-id="${escapeHtml(notification.workout_id || "") }"
       >
         <div>${escapeHtml(notification.title || "Notifica")}</div>
+
         <p style="margin:5px 0;">
           ${escapeHtml(notification.message || "")}
         </p>
+
         <div class="ft-small">
           ${formatDateTime(notification.created_at)} · Nuova · Tocca per aprire
         </div>
@@ -938,59 +1172,99 @@
       const count = workoutCounts[member.id] || 0;
       const progress = Math.min(count, 3);
       const percentage = (progress / 3) * 100;
+
       const plan = member.weekly_plan === "runner"
         ? "2 palestre + corsa"
         : "2 palestre + sport libero";
+
       const isYou = member.id === ownMember.id;
 
       return `
         <div class="ft-panel">
           <div class="ft-member-name">
-            <h3 style="margin:0;font-size:19px;">${escapeHtml(member.display_name)}</h3>
-            <span class="ft-status approved">${isYou ? "TU" : "PARTNER"}</span>
+            <h3 style="margin:0;font-size:19px;">
+              ${escapeHtml(member.display_name)}
+            </h3>
+
+            <span class="ft-status approved">
+              ${isYou ? "TU" : "PARTNER"}
+            </span>
           </div>
+
           <p class="ft-subtitle">${escapeHtml(plan)}</p>
+
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:18px;">
             <strong>Progresso settimanale</strong>
             <strong style="font-size:20px;">${count}/3</strong>
           </div>
-          <div class="ft-progress"><div class="ft-progress-fill" style="width:${percentage}%;"></div></div>
+
+          <div class="ft-progress">
+            <div class="ft-progress-fill" style="width:${percentage}%;"></div>
+          </div>
+
           <p class="ft-subtitle">
-            ${count >= 3 ? "Obiettivo settimanale raggiunto!" : `Ancora ${3 - count} allenamenti approvati`}
+            ${count >= 3
+              ? "Obiettivo settimanale raggiunto!"
+              : `Ancora ${3 - count} allenamenti approvati`}
           </p>
         </div>
       `;
     }).join("");
 
     const ownSlots = getPlanSlots(ownMember.weekly_plan);
+
     const slotsHtml = ownSlots.map(slot => {
       const workout = getSlotWorkout(
         workouts.filter(item => item.member_id === ownMember.id),
         slot.id
       );
-      const status = workout?.status || null;
-      const displayStatus = !workout ? "Da caricare" : statusLabel(status);
-      let actionHtml = "";
 
-      if (status === "approved") {
-        actionHtml = `<span class="ft-status approved">Approvato</span>`;
-      } else if (status === "pending") {
-        actionHtml = `<span class="ft-status pending">In approvazione</span>`;
+      const status = workout?.status || null;
+      const displayStatus = !workout
+        ? "Da caricare"
+        : statusLabel(status);
+
+      let actionHtml = "";
+      let clickable = false;
+
+      if (status === "approved" || status === "pending") {
+        clickable = true;
+
+        actionHtml = `
+          <span class="ft-status ${status}">
+            ${status === "pending" ? "Caricata" : "Approvata"}
+          </span>
+        `;
       } else {
         actionHtml = `
-          <button class="ft-button ft-primary" data-action="upload" data-slot="${slot.id}">
+          <button
+            class="ft-button ft-primary"
+            data-action="upload"
+            data-slot="${slot.id}"
+          >
             ${status === "rejected" ? "Riprova" : "Carica"}
           </button>
         `;
       }
 
       return `
-        <div class="ft-slot">
+        <div
+          class="ft-slot ${clickable ? "clickable" : ""}"
+          ${clickable ? `
+            data-action="view-workout"
+            data-id="${escapeHtml(workout.id)}"
+            role="button"
+            tabindex="0"
+            aria-label="Apri dettagli ${escapeHtml(slot.title)}"
+          ` : ""}
+        >
           <div class="ft-slot-icon">${slot.icon}</div>
+
           <div class="ft-slot-info">
             <p class="ft-slot-title">${escapeHtml(slot.title)}</p>
             <p class="ft-slot-detail">${escapeHtml(displayStatus)}</p>
           </div>
+
           ${actionHtml}
         </div>
       `;
@@ -998,85 +1272,174 @@
 
     let pageContent = "";
 
-    if (currentView === "reviews") {
+    if (currentView === "workout-detail") {
+      const workout = workouts.find(item => item.id === selectedWorkoutId);
+
+      if (!workout) {
+        pageContent = `
+          <div class="ft-panel">
+            <p class="ft-message">Attività non trovata.</p>
+            <button class="ft-button ft-secondary" data-action="back">
+              ← Torna alla dashboard
+            </button>
+          </div>
+        `;
+      } else {
+        await renderWorkoutDetails(workout);
+        return;
+      }
+
+    } else if (currentView === "reviews") {
       const pendingHtml = await renderPendingReviews(pendingWorkouts, members);
+
       pageContent = `
         <div class="ft-panel">
           <div class="ft-toolbar">
             <div>
               <h2 class="ft-page-title">Reviews</h2>
-              <p class="ft-subtitle">Controlla gli allenamenti caricati dal tuo partner.</p>
+              <p class="ft-subtitle">
+                Controlla gli allenamenti caricati dal tuo partner.
+              </p>
             </div>
+
             <span class="ft-status ${pendingWorkouts.length ? "pending" : "approved"}">
               ${pendingWorkouts.length} da revisionare
             </span>
           </div>
+
           ${pendingHtml}
         </div>
       `;
+
     } else {
       pageContent = `
         <div class="ft-panel">
           <h3 style="margin:0 0 7px;">La vostra settimana</h3>
-          <p class="ft-subtitle">${formatDate(week.start)} – ${formatDate(week.end)}</p>
-          <p style="margin:13px 0 0;">Ogni partecipante deve completare 3 allenamenti approvati.</p>
+
+          <p class="ft-subtitle">
+            ${formatDate(week.start)} – ${formatDate(week.end)}
+          </p>
+
+          <p style="margin:13px 0 0;">
+            Ogni partecipante deve completare 3 allenamenti approvati.
+          </p>
+
           <div style="margin-top:14px;">
             <strong>Il tuo progresso: ${approvedCount}/3</strong>
-            <div class="ft-progress"><div class="ft-progress-fill" style="width:${Math.min(approvedCount, 3) / 3 * 100}%;"></div></div>
+
+            <div class="ft-progress">
+              <div class="ft-progress-fill" style="width:${Math.min(approvedCount, 3) / 3 * 100}%;"></div>
+            </div>
           </div>
         </div>
 
         <div>
           <h3 class="ft-heading" style="font-size:19px;">I tuoi obiettivi</h3>
-          <p class="ft-subtitle">Carica i tuoi allenamenti e attendi l'approvazione del partner.</p>
+
+          <p class="ft-subtitle">
+            Carica i tuoi allenamenti e attendi l'approvazione del partner.
+          </p>
+
           ${slotsHtml}
         </div>
 
         <div>
-          <h3 class="ft-heading" style="font-size:19px;">Progresso di entrambi</h3>
-          <div class="ft-member-grid" style="margin-top:12px;">${memberCards}</div>
+          <h3 class="ft-heading" style="font-size:19px;">
+            Progresso di entrambi
+          </h3>
+
+          <div class="ft-member-grid" style="margin-top:12px;">
+            ${memberCards}
+          </div>
         </div>
       `;
     }
 
     challengeCard.innerHTML = `
       <div class="ft-dashboard">
+
         <div class="ft-toolbar">
           <div>
             <p class="ft-subtitle">LA VOSTRA SFIDA</p>
-            <h2 class="ft-heading">${escapeHtml(challenge.name || "FIT TOGETHER")}</h2>
-            <p class="ft-subtitle">Ciao ${escapeHtml(ownMember.display_name)}!</p>
+
+            <h2 class="ft-heading">
+              ${escapeHtml(challenge.name || "FIT TOGETHER")}
+            </h2>
+
+            <p class="ft-subtitle">
+              Ciao ${escapeHtml(ownMember.display_name)}!
+            </p>
           </div>
 
-          <div style="display:flex;gap:9px;align-items:center;">
-            <div class="ft-menu-area">
-              <button class="ft-menu-button" data-action="toggle-menu" aria-label="Apri menu" aria-expanded="false">☰</button>
-              <div id="ftMenu" class="ft-menu-panel ft-hidden">
-                <button class="ft-menu-item ${currentView === "home" ? "active" : ""}" data-action="nav-home">⌂ Homepage</button>
-                <button class="ft-menu-item ${currentView === "reviews" ? "active" : ""}" data-action="nav-reviews">✓ Reviews${pendingWorkouts.length ? ` (${pendingWorkouts.length})` : ""}</button>
-              </div>
-            </div>
+          <div class="ft-toolbar-right">
 
             <div class="ft-notification-area">
-              <button class="ft-bell-button" data-action="toggle-notifications" aria-label="Notifiche">
+              <button
+                class="ft-bell-button"
+                data-action="toggle-notifications"
+                aria-label="Notifiche"
+              >
                 🔔
-                ${unreadCount ? `<span class="ft-bell-count">${unreadCount}</span>` : ""}
+                ${unreadCount
+                  ? `<span class="ft-bell-count">${unreadCount}</span>`
+                  : ""}
               </button>
             </div>
 
-            <button class="ft-button ft-secondary" data-action="logout">Esci</button>
+            <div class="ft-menu-area">
+              <button
+                class="ft-menu-button"
+                data-action="toggle-menu"
+                aria-label="Apri menu"
+                aria-expanded="false"
+              >
+                ☰
+              </button>
+
+              <div id="ftMenu" class="ft-menu-panel ft-hidden">
+
+                <button
+                  class="ft-menu-item ${currentView === "home" ? "active" : ""}"
+                  data-action="nav-home"
+                >
+                  ⌂ Homepage
+                </button>
+
+                <button
+                  class="ft-menu-item ${currentView === "reviews" ? "active" : ""}"
+                  data-action="nav-reviews"
+                >
+                  ✓ Reviews${pendingWorkouts.length
+                    ? ` (${pendingWorkouts.length})`
+                    : ""}
+                </button>
+
+                <div class="ft-menu-divider"></div>
+
+                <button class="ft-menu-item" data-action="logout">
+                  ↪ Esci
+                </button>
+
+              </div>
+            </div>
+
           </div>
         </div>
 
         <div id="ftNotifications" class="ft-panel ft-hidden">
           <div class="ft-toolbar">
             <h3 style="margin:0;">Nuove notifiche</h3>
-            <button class="ft-button ft-secondary" data-action="refresh">Aggiorna</button>
+
+            <button class="ft-button ft-secondary" data-action="refresh">
+              Aggiorna
+            </button>
           </div>
+
           ${renderNotifications(notifications)}
         </div>
 
         ${pageContent}
+
       </div>
     `;
   }
@@ -1144,7 +1507,7 @@
 
         client
           .from("workout_entries")
-          .select("id, member_id, session_slot, activity_type, activity_date, duration_minutes, distance_km, status, created_at")
+          .select("id, member_id, session_slot, activity_type, activity_date, duration_minutes, distance_km, notes, proof_path, status, created_at")
           .eq("challenge_id", ownMember.challenge_id)
           .gte("activity_date", week.start)
           .lte("activity_date", week.end),
@@ -1225,34 +1588,75 @@
 
     if (action === "toggle-menu") {
       const menu = document.getElementById("ftMenu");
+
       if (menu) {
         menu.classList.toggle("ft-hidden");
-        button.setAttribute("aria-expanded", String(!menu.classList.contains("ft-hidden")));
+
+        button.setAttribute(
+          "aria-expanded",
+          String(!menu.classList.contains("ft-hidden"))
+        );
       }
+
       return;
     }
 
     if (action === "nav-home") {
       currentView = "home";
+      selectedWorkoutId = null;
       await loadDashboard(currentUser);
       return;
     }
 
     if (action === "nav-reviews") {
       currentView = "reviews";
+      selectedWorkoutId = null;
       await loadDashboard(currentUser);
       return;
     }
 
     if (action === "open-notification") {
       try {
+        const notificationType = button.dataset.type;
+
         await markNotificationRead(button.dataset.id);
-        currentView = "reviews";
+
+        if (isReviewNotification({
+          notification_type: notificationType
+        })) {
+          currentView = "reviews";
+          selectedWorkoutId = null;
+        }
+
         await loadDashboard(currentUser);
+
       } catch (error) {
         console.error("FIT TOGETHER notification error:", error);
         alert("Errore durante l'apertura della notifica: " + error.message);
       }
+
+      return;
+    }
+
+    if (action === "toggle-notifications") {
+      const panel = document.getElementById("ftNotifications");
+
+      if (panel) {
+        panel.classList.toggle("ft-hidden");
+      }
+
+      return;
+    }
+
+    if (action === "view-workout") {
+      selectedWorkoutId = button.dataset.id;
+      currentView = "workout-detail";
+      await loadDashboard(currentUser);
+      return;
+    }
+
+    if (action === "delete-workout") {
+      await deleteWorkout(button.dataset.id);
       return;
     }
 
@@ -1269,14 +1673,19 @@
       }
 
       window.location.reload();
+      return;
     }
 
     if (action === "refresh") {
       await loadDashboard(currentUser);
+      return;
     }
 
     if (action === "back") {
+      selectedWorkoutId = null;
+      currentView = "home";
       await loadDashboard(currentUser);
+      return;
     }
 
     if (action === "upload") {
@@ -1286,22 +1695,32 @@
       if (slot) {
         showWorkoutForm(currentMember, slot);
       }
+
+      return;
     }
 
     if (action === "approve") {
       await reviewWorkout(button.dataset.id, true);
+      return;
     }
 
     if (action === "reject") {
       await reviewWorkout(button.dataset.id, false);
+      return;
     }
+  });
 
-    if (action === "toggle-notifications") {
-      const panel = document.getElementById("ftNotifications");
+  // --------------------------------------------------
+  // KEYBOARD ACCESSIBILITY FOR WORKOUT CARDS
+  // --------------------------------------------------
 
-      if (panel) {
-        panel.classList.toggle("ft-hidden");
-      }
+  challengeCard.addEventListener("keydown", event => {
+    if (
+      (event.key === "Enter" || event.key === " ") &&
+      event.target.matches(".ft-slot[data-action='view-workout']")
+    ) {
+      event.preventDefault();
+      event.target.click();
     }
   });
 
@@ -1316,6 +1735,8 @@
       setTimeout(() => loadDashboard(session.user), 0);
     } else {
       currentView = "home";
+      selectedWorkoutId = null;
+
       if (notificationRefreshTimer) {
         clearInterval(notificationRefreshTimer);
         notificationRefreshTimer = null;
