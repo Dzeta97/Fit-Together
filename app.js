@@ -2418,9 +2418,12 @@
         }
 
         historyMonth = null;
+        
+        const currentInfo = getISOWeekInfo(localDateString());
 
-        // La Timeline parte sempre dalla prima settimana dell'anno.
-        historyWeek = 1;
+historyWeek = Number(historyYear) === currentInfo.year
+  ? currentInfo.week
+  : getISOWeekInfo(`${historyYear}-12-28`).week;
 
       } else {
         historyMode = "list";
