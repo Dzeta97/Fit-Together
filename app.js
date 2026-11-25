@@ -158,11 +158,11 @@
   function statusLabel(status) {
     const labels = {
       approved: "Approvato",
-      pending: "In attesa",
+      pending: "In approvazione",
       rejected: "Rifiutato"
     };
 
-    return labels[status] || status || "Sconosciuto";
+    return labels[status] || status || "Da caricare";
   }
 
   function getSlotWorkout(workouts, slotId) {
@@ -230,6 +230,7 @@
         border:1px solid var(--border-color, #e1e5eb);
         border-radius:14px;
         margin-top:10px;
+        min-width:0;
       }
 
       .ft-slot-icon {
@@ -286,6 +287,16 @@
         font-weight:700;
         cursor:pointer;
         font-size:13px;
+      }
+
+      /* Pulsante Carica: dimensioni ridotte e allineamento a destra */
+      .ft-slot .ft-button {
+        width:auto;
+        min-width:74px;
+        flex:0 0 auto;
+        padding:8px 11px;
+        font-size:12px;
+        white-space:nowrap;
       }
 
       .ft-primary {
@@ -916,12 +927,17 @@
 
       const status = workout?.status || null;
 
+      // Stato visibile sotto il nome dell'attività
+      const displayStatus = !workout
+        ? "Da caricare"
+        : statusLabel(status);
+
       let actionHtml = "";
 
       if (status === "approved") {
         actionHtml = `<span class="ft-status approved">Approvato</span>`;
       } else if (status === "pending") {
-        actionHtml = `<span class="ft-status pending">In attesa</span>`;
+        actionHtml = `<span class="ft-status pending">In approvazione</span>`;
       } else {
         actionHtml = `
           <button
@@ -942,9 +958,7 @@
             <p class="ft-slot-title">${escapeHtml(slot.title)}</p>
 
             <p class="ft-slot-detail">
-              ${status
-                ? `${statusLabel(status)}${workout?.activity_date ? " · " + formatDate(workout.activity_date) : ""}`
-                : escapeHtml(slot.description)}
+              ${escapeHtml(displayStatus)}
             </p>
           </div>
 
