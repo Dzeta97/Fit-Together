@@ -25,6 +25,11 @@
   let currentChallenge = null;
   let currentView = "home";
   let selectedWorkoutId = null;
+  let workoutDetailReturnView = "home";
+  let historyMode = "timeline";
+  let historyYear = new Date().getFullYear();
+  let historyMonth = new Date().getMonth() + 1;
+  let historyWeek = null;
 
   // --------------------------------------------------
   // UTILITIES
@@ -83,6 +88,28 @@
       start: localDateString(monday),
       end: localDateString(sunday)
     };
+  }
+
+  function getISOWeekInfo(value) {
+    const date = new Date(`${value}T12:00:00`);
+    const day = (date.getDay() + 6) % 7;
+    date.setDate(date.getDate() - day + 3);
+    const isoYear = date.getFullYear();
+    const firstThursday = new Date(isoYear, 0, 4);
+    const firstDay = (firstThursday.getDay() + 6) % 7;
+    firstThursday.setDate(firstThursday.getDate() - firstDay + 3);
+    const week = 1 + Math.round((date - firstThursday) / 604800000);
+    return { year: isoYear, week };
+  }
+
+  function getISOWeekRange(year, week) {
+    const jan4 = new Date(year, 0, 4, 12);
+    const day = (jan4.getDay() + 6) % 7;
+    const monday = new Date(jan4);
+    monday.setDate(jan4.getDate() - day + (week - 1) * 7);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    return { start: localDateString(monday), end: localDateString(sunday) };
   }
 
   function showMessage(title, message, isError = false) {
@@ -570,6 +597,100 @@
         margin-top:15px;
         background:rgba(0,0,0,.04);
       }
+
+      .ft-history-controls {
+        display:grid;
+        grid-template-columns:repeat(3,minmax(0,1fr));
+        gap:9px;
+        margin:18px 0;
+      }
+
+      .ft-history-controls label {
+        display:grid;
+        gap:6px;
+        font-size:12px;
+        font-weight:700;
+      }
+
+      .ft-history-controls select {
+        min-width:0;
+        width:100%;
+        padding:10px 7px;
+        border:1px solid var(--border-color,#d5dbe2);
+        border-radius:9px;
+        background:var(--card-bg,#fff);
+        color:inherit;
+      }
+
+      .ft-mode-switch {
+        display:flex;
+        gap:8px;
+        margin:15px 0;
+      }
+
+      .ft-mode-switch .active {
+        background:#168b68;
+        color:white;
+        border-color:#168b68;
+      }
+
+      .ft-week-timeline {
+        display:flex;
+        gap:8px;
+        overflow-x:auto;
+        padding:5px 1px 12px;
+      }
+
+      .ft-week-chip {
+        flex:0 0 auto;
+        min-width:62px;
+        border:1px solid var(--border-color,#d5dbe2);
+        border-radius:12px;
+        padding:10px 12px;
+        background:transparent;
+        color:inherit;
+        cursor:pointer;
+        font-weight:700;
+      }
+
+      .ft-week-chip.active {
+        background:#168b68;
+        color:white;
+        border-color:#168b68;
+      }
+
+      .ft-history-item {
+        display:flex;
+        align-items:center;
+        gap:12px;
+        width:100%;
+        padding:14px 4px;
+        border:0;
+        border-bottom:1px solid var(--border-color,#e1e5eb);
+        background:transparent;
+        color:inherit;
+        text-align:left;
+        cursor:pointer;
+      }
+
+      .ft-history-item:last-child { border-bottom:0; }
+      .ft-history-icon { font-size:24px; width:34px; text-align:center; }
+      .ft-history-main { flex:1; min-width:0; }
+      .ft-history-meta { color:var(--text-muted,#718096); font-size:12px; margin-top:4px; }
+      .ft-history-group { margin-top:18px; }
+
+      .ft-rule-card {
+        padding:17px;
+        border:1px solid var(--border-color,#e1e5eb);
+        border-radius:14px;
+        margin-top:12px;
+      }
+
+      .ft-rule-card h3 { margin:0 0 8px; font-size:16px; }
+      .ft-rule-card p { margin:0; line-height:1.55; font-size:14px; }
+      .ft-rule-card.success { background:rgba(48,181,139,.09); }
+      .ft-rule-card.warning { background:rgba(245,181,55,.11); }
+      .ft-rule-card.info { background:rgba(70,140,220,.10); }
 
       .ft-hidden {
         display:none !important;
@@ -1154,7 +1275,8 @@
     pendingWorkouts,
     notifications,
     ownMember,
-    week
+    week,
+    historyWorkouts
   ) {
     const workoutCounts = {};
 
@@ -1205,7 +1327,7 @@
           <p class="ft-subtitle">
             ${count >= 3
               ? "Obiettivo settimanale raggiunto!"
-              : `Ancora ${3 - count} allenamenti approvati`}
+              : `Ancora ${3 - count} allenamenti da registrare`}
           </p>
         </div>
       `;
@@ -1273,7 +1395,7 @@
     let pageContent = "";
 
     if (currentView === "workout-detail") {
-      const workout = workouts.find(item => item.id === selectedWorkoutId);
+      const workout = [...workouts, ...historyWorkouts].find(item => item.id === selectedWorkoutId);
 
       if (!workout) {
         pageContent = `
@@ -1308,6 +1430,84 @@
           </div>
 
           ${pendingHtml}
+        </div>
+      `;
+
+    } else if (currentView === "history") {
+      const years = [...new Set(historyWorkouts.map(item => getISOWeekInfo(item.activity_date).year))].sort((a,b) => b-a);
+      const selectedYear = years.includes(Number(historyYear)) ? Number(historyYear) : (years[0] || new Date().getFullYear());
+      const monthNames = ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"];
+      const monthWorkouts = historyWorkouts.filter(item => {
+        const info = getISOWeekInfo(item.activity_date);
+        const month = Number(item.activity_date.slice(5,7));
+        return info.year === selectedYear && month === Number(historyMonth);
+      });
+      const weekNumbers = [...new Set(monthWorkouts.map(item => getISOWeekInfo(item.activity_date).week))].sort((a,b) => a-b);
+      if (!historyWeek || !weekNumbers.includes(Number(historyWeek))) historyWeek = weekNumbers.length ? weekNumbers[weekNumbers.length - 1] : null;
+      const selectedWeekWorkouts = monthWorkouts.filter(item => getISOWeekInfo(item.activity_date).week === Number(historyWeek)).sort((a,b) => b.activity_date.localeCompare(a.activity_date));
+      const renderHistoryItem = workout => `
+        <button class="ft-history-item" data-action="view-workout" data-id="${escapeHtml(workout.id)}">
+          <span class="ft-history-icon">${workout.activity_type === "running" ? "🏃" : workout.activity_type === "gym" ? "🏋️" : workout.activity_type === "cycling" ? "🚴" : workout.activity_type === "trekking" ? "🥾" : "💪"}</span>
+          <span class="ft-history-main">
+            <strong>${escapeHtml(activityLabel(workout.activity_type))}</strong>
+            <span class="ft-history-meta">${formatDate(workout.activity_date)} · ${Number(workout.duration_minutes || 0)} min${workout.distance_km ? ` · ${Number(workout.distance_km)} km` : ""}</span>
+          </span>
+          <span class="ft-status approved">Approvato</span>
+        </button>`;
+      let historyBody = "";
+      if (!historyWorkouts.length) {
+        historyBody = `<p class="ft-message">Non hai ancora attività approvate nello storico.</p>`;
+      } else if (historyMode === "timeline") {
+        historyBody = `
+          <div class="ft-week-timeline">
+            ${weekNumbers.map(number => `<button class="ft-week-chip ${Number(historyWeek) === number ? "active" : ""}" data-action="history-week" data-week="${number}">CW${number}</button>`).join("")}
+          </div>
+          <h3 style="margin:8px 0;">${historyWeek ? `CW${historyWeek}` : "Nessuna settimana"}</h3>
+          ${selectedWeekWorkouts.length ? selectedWeekWorkouts.map(renderHistoryItem).join("") : `<p class="ft-message">Nessuna attività approvata in questa settimana.</p>`}
+        `;
+      } else {
+        const grouped = {};
+        monthWorkouts.forEach(item => {
+          const info = getISOWeekInfo(item.activity_date);
+          (grouped[info.week] ||= []).push(item);
+        });
+        const visibleGroups = historyWeek ? Object.keys(grouped).map(Number).filter(number => number === Number(historyWeek)) : Object.keys(grouped).map(Number);
+        historyBody = visibleGroups.sort((a,b) => b-a).map(number => `
+          <div class="ft-history-group">
+            <h3 style="margin:0 0 5px;">CW${number}</h3>
+            ${grouped[number].sort((a,b) => b.activity_date.localeCompare(a.activity_date)).map(renderHistoryItem).join("")}
+          </div>
+        `).join("") || `<p class="ft-message">Nessuna attività approvata per il periodo selezionato.</p>`;
+      }
+      pageContent = `
+        <div class="ft-panel">
+          <h2 class="ft-page-title">Storico attività</h2>
+          <p class="ft-subtitle">Qui trovi tutti i tuoi allenamenti approvati.</p>
+          <div class="ft-history-controls">
+            <label>Anno<select data-history-filter="year">${(years.length ? years : [new Date().getFullYear()]).map(y => `<option value="${y}" ${y === selectedYear ? "selected" : ""}>${y}</option>`).join("")}</select></label>
+            <label>Mese<select data-history-filter="month">${monthNames.map((name,i) => `<option value="${i+1}" ${i+1 === Number(historyMonth) ? "selected" : ""}>${name}</option>`).join("")}</select></label>
+            <label>Settimana<select data-history-filter="week"><option value="">Tutte</option>${weekNumbers.map(number => `<option value="${number}" ${number === Number(historyWeek) ? "selected" : ""}>CW${number}</option>`).join("")}</select></label>
+          </div>
+          <div class="ft-mode-switch">
+            <button class="ft-button ft-secondary ${historyMode === "timeline" ? "active" : ""}" data-action="history-mode" data-mode="timeline">◷ Timeline</button>
+            <button class="ft-button ft-secondary ${historyMode === "list" ? "active" : ""}" data-action="history-mode" data-mode="list">☷ Elenco</button>
+          </div>
+          ${historyBody}
+        </div>
+      `;
+
+    } else if (currentView === "rules") {
+      pageContent = `
+        <div class="ft-panel">
+          <div style="font-size:34px;">🏆</div>
+          <h2 class="ft-page-title" style="margin-top:8px;">Il regolamento</h2>
+          <p class="ft-subtitle">Benvenuti in FIT TOGETHER, ${escapeHtml(ownMember.display_name)}! 💪</p>
+          <p style="line-height:1.65;margin-top:18px;">La sfida è semplice: ogni settimana dovrete raggiungere il vostro obiettivo sportivo e registrare le attività previste. Il vostro partner farà lo stesso e avrà il compito di verificare gli allenamenti.</p>
+          <h3 style="margin:24px 0 8px;">E domenica sera… si fanno i conti!</h3>
+          <div class="ft-rule-card success"><h3>🥗 Entrambi raggiungete l'obiettivo</h3><p>Complimenti! Vi meritate una bella cena salutare per festeggiare. Il conto? Rigorosamente diviso a metà!</p></div>
+          <div class="ft-rule-card warning"><h3>😉 Solo uno raggiunge l'obiettivo</h3><p>Chi non ha completato la sfida offre la cena all'altro. Niente scuse!</p></div>
+          <div class="ft-rule-card info"><h3>❤️ Nessuno raggiunge l'obiettivo</h3><p>Niente cena questa volta: entrambi donate 10 € a un'associazione benefica a vostra scelta.</p></div>
+          <p style="line-height:1.65;margin-top:22px;font-weight:650;">La cosa più importante è mantenere la costanza, motivarsi a vicenda e divertirsi. Le sfide sono fatte per essere vinte… quindi cerchiamo di non fare della beneficenza un appuntamento fisso! 💚</p>
         </div>
       `;
 
@@ -1406,12 +1606,26 @@
                 </button>
 
                 <button
+                  class="ft-menu-item ${currentView === "rules" ? "active" : ""}"
+                  data-action="nav-rules"
+                >
+                  📖 Regolamento
+                </button>
+
+                <button
                   class="ft-menu-item ${currentView === "reviews" ? "active" : ""}"
                   data-action="nav-reviews"
                 >
                   ✓ Reviews${pendingWorkouts.length
                     ? ` (${pendingWorkouts.length})`
                     : ""}
+                </button>
+
+                <button
+                  class="ft-menu-item ${currentView === "history" ? "active" : ""}"
+                  data-action="nav-history"
+                >
+                  ◷ Storico attività
                 </button>
 
                 <div class="ft-menu-divider"></div>
@@ -1497,7 +1711,8 @@
         membersResult,
         workoutsResult,
         pendingResult,
-        notificationsResult
+        notificationsResult,
+        historyResult
       ] = await Promise.all([
         client
           .from("challenge_members")
@@ -1527,13 +1742,22 @@
           .eq("recipient_id", user.id)
           .eq("is_read", false)
           .order("created_at", { ascending: false })
-          .limit(20)
+          .limit(20),
+
+        client
+          .from("workout_entries")
+          .select("id, member_id, session_slot, activity_type, activity_date, duration_minutes, distance_km, notes, proof_path, status, created_at")
+          .eq("challenge_id", ownMember.challenge_id)
+          .eq("member_id", ownMember.id)
+          .eq("status", "approved")
+          .order("activity_date", { ascending: false })
       ]);
 
       if (membersResult.error) throw membersResult.error;
       if (workoutsResult.error) throw workoutsResult.error;
       if (pendingResult.error) throw pendingResult.error;
       if (notificationsResult.error) throw notificationsResult.error;
+      if (historyResult.error) throw historyResult.error;
 
       await renderDashboard(
         challenge,
@@ -1542,7 +1766,8 @@
         pendingResult.data || [],
         notificationsResult.data || [],
         ownMember,
-        week
+        week,
+        historyResult.data || []
       );
 
       console.log("FIT TOGETHER: dashboard caricata.");
@@ -1615,6 +1840,37 @@
       return;
     }
 
+    if (action === "nav-history") {
+      currentView = "history";
+      selectedWorkoutId = null;
+      historyYear = new Date().getFullYear();
+      historyMonth = new Date().getMonth() + 1;
+      historyWeek = null;
+      historyMode = "timeline";
+      await loadDashboard(currentUser);
+      return;
+    }
+
+    if (action === "nav-rules") {
+      currentView = "rules";
+      selectedWorkoutId = null;
+      await loadDashboard(currentUser);
+      return;
+    }
+
+    if (action === "history-mode") {
+      historyMode = button.dataset.mode === "list" ? "list" : "timeline";
+      await loadDashboard(currentUser);
+      return;
+    }
+
+    if (action === "history-week") {
+      historyWeek = Number(button.dataset.week);
+      historyMode = "timeline";
+      await loadDashboard(currentUser);
+      return;
+    }
+
     if (action === "open-notification") {
       try {
         const notificationType = button.dataset.type;
@@ -1650,6 +1906,7 @@
 
     if (action === "view-workout") {
       selectedWorkoutId = button.dataset.id;
+      workoutDetailReturnView = currentView;
       currentView = "workout-detail";
       await loadDashboard(currentUser);
       return;
@@ -1683,7 +1940,8 @@
 
     if (action === "back") {
       selectedWorkoutId = null;
-      currentView = "home";
+      if (currentView === "workout-detail") currentView = workoutDetailReturnView;
+      else currentView = "home";
       await loadDashboard(currentUser);
       return;
     }
@@ -1708,6 +1966,25 @@
       await reviewWorkout(button.dataset.id, false);
       return;
     }
+  });
+
+  challengeCard.addEventListener("change", async event => {
+    const filter = event.target.closest("[data-history-filter]");
+    if (!filter) return;
+
+    const kind = filter.dataset.historyFilter;
+    if (kind === "year") {
+      historyYear = Number(filter.value);
+      historyWeek = null;
+    } else if (kind === "month") {
+      historyMonth = Number(filter.value);
+      historyWeek = null;
+    } else if (kind === "week") {
+      historyWeek = filter.value ? Number(filter.value) : null;
+      historyMode = "timeline";
+    }
+
+    await loadDashboard(currentUser);
   });
 
   // --------------------------------------------------
