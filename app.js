@@ -1,3 +1,4 @@
+
 (() => {
   "use strict";
 
@@ -719,27 +720,86 @@
         margin-top:18px;
       }
 
+      /* TIMELINE ORIZZONTALE */
+
+      .ft-panel:has(#ftTimelineScroll) {
+        width:100%;
+        max-width:100%;
+        min-width:0;
+        box-sizing:border-box;
+        overflow:hidden;
+      }
+
+      .ft-timeline-scroll {
+        display:block;
+        width:100%;
+        max-width:100%;
+        min-width:0;
+        box-sizing:border-box;
+        overflow-x:auto;
+        overflow-y:hidden;
+        padding-bottom:10px;
+        -webkit-overflow-scrolling:touch;
+        overscroll-behavior-x:contain;
+        touch-action:pan-x;
+        scrollbar-width:auto;
+        scrollbar-color:#89949f #e8edf0;
+      }
+
+      .ft-timeline-scroll::-webkit-scrollbar {
+        height:8px;
+      }
+
+      .ft-timeline-scroll::-webkit-scrollbar-track {
+        background:#e8edf0;
+        border-radius:10px;
+      }
+
+      .ft-timeline-scroll::-webkit-scrollbar-thumb {
+        background:#89949f;
+        border-radius:10px;
+      }
+
+      .ft-timeline-scroll::-webkit-scrollbar-thumb:hover {
+        background:#66727e;
+      }
+
+      .ft-timeline-content {
+        width:max-content;
+        min-width:100%;
+      }
+
       .ft-timeline-months {
-        display:grid;
-        grid-template-columns:repeat(12,minmax(0,1fr));
-        gap:2px;
+        display:flex;
+        width:max-content;
+        min-width:100%;
         margin:18px 0 5px;
         color:var(--text-muted,#718096);
-        font-size:9px;
+        font-size:10px;
         text-align:center;
+      }
+
+      .ft-timeline-month {
+        flex:0 0 auto;
+        box-sizing:border-box;
+        white-space:nowrap;
+        overflow:hidden;
       }
 
       .ft-week-timeline {
         display:flex;
+        flex-wrap:nowrap;
+        width:max-content;
+        min-width:100%;
         gap:7px;
-        overflow-x:auto;
+        box-sizing:border-box;
         padding:8px 2px 14px;
-        scroll-snap-type:x mandatory;
-        -webkit-overflow-scrolling:touch;
       }
 
       .ft-week-chip {
+        box-sizing:border-box;
         flex:0 0 86px;
+        width:86px;
         min-width:86px;
         min-height:72px;
         border:1px solid var(--border-color,#d5dbe2);
@@ -748,7 +808,6 @@
         background:transparent;
         color:inherit;
         cursor:pointer;
-        scroll-snap-align:center;
         display:flex;
         flex-direction:column;
         justify-content:center;
@@ -1700,16 +1759,6 @@
         for (let weekNumber = 1; weekNumber <= lastWeekOfYear; weekNumber++) {
           const range = getISOWeekRange(timelineYear, weekNumber);
 
-          const startDate = new Date(`${range.start}T12:00:00`);
-          const endDate = new Date(`${range.end}T12:00:00`);
-
-          const intersectsMonth = !selectedMonth || (
-            startDate.getMonth() + 1 <= selectedMonth &&
-            endDate.getMonth() + 1 >= selectedMonth
-          );
-
-          if (!intersectsMonth) continue;
-
           timelineWeeks.push({
             week: weekNumber,
             start: range.start,
@@ -1719,11 +1768,7 @@
 
         const selectedTimelineWeek = historyWeek !== null
           ? Number(historyWeek)
-          : (
-            timelineYear === currentInfo.year
-              ? currentInfo.week
-              : lastWeekOfYear
-          );
+          : 1;
 
         const selectedRange = getISOWeekRange(
           timelineYear,
@@ -1741,34 +1786,76 @@
             b.activity_date.localeCompare(a.activity_date)
           );
 
+        // Raggruppa le settimane per mese.
+        // Il mese viene assegnato in base al giovedì della settimana ISO.
+
+        const monthGroups = [];
+
+        timelineWeeks.forEach(item => {
+          const monday = new Date(`${item.start}T12:00:00`);
+          const thursday = new Date(monday);
+
+          thursday.setDate(monday.getDate() + 3);
+
+          const monthIndex = thursday.getMonth();
+
+          const lastGroup = monthGroups[monthGroups.length - 1];
+
+          if (lastGroup && lastGroup.monthIndex === monthIndex) {
+            lastGroup.count++;
+          } else {
+            monthGroups.push({
+              monthIndex,
+              count: 1
+            });
+          }
+        });
+
+        const monthsHtml = monthGroups.map(group => {
+          const width = group.count * 86 + (group.count - 1) * 7;
+
+          return `
+            <span
+              class="ft-timeline-month"
+              style="width:${width}px;"
+            >
+              ${monthNames[group.monthIndex].slice(0, 3)}
+            </span>
+          `;
+        }).join("");
+
         historyBody = `
-          <div class="ft-timeline-months">
-            ${monthNames.map(name => `
-              <span>${name.slice(0, 3)}</span>
-            `).join("")}
-          </div>
+          <div class="ft-timeline-scroll" id="ftTimelineScroll">
+            <div class="ft-timeline-content">
 
-          <div class="ft-week-timeline" id="ftWeekTimeline">
-            ${timelineWeeks.map(item => {
-              const startDate = new Date(`${item.start}T12:00:00`);
-              const endDate = new Date(`${item.end}T12:00:00`);
+              <div class="ft-timeline-months">
+                ${monthsHtml}
+              </div>
 
-              const dateLabel =
-                `${startDate.getDate()} ${monthNames[startDate.getMonth()].slice(0, 3)}`
-                + ` – ${endDate.getDate()} ${monthNames[endDate.getMonth()].slice(0, 3)}`;
+              <div class="ft-week-timeline" id="ftWeekTimeline">
+                ${timelineWeeks.map(item => {
+                  const startDate = new Date(`${item.start}T12:00:00`);
+                  const endDate = new Date(`${item.end}T12:00:00`);
 
-              return `
-                <button
-                  class="ft-week-chip ${item.week === selectedTimelineWeek ? "active" : ""}"
-                  data-action="history-week"
-                  data-week="${item.week}"
-                  data-year="${timelineYear}"
-                >
-                  <strong>CW${item.week}</strong>
-                  <span>${dateLabel}</span>
-                </button>
-              `;
-            }).join("")}
+                  const dateLabel =
+                    `${startDate.getDate()} ${monthNames[startDate.getMonth()].slice(0, 3)}`
+                    + ` – ${endDate.getDate()} ${monthNames[endDate.getMonth()].slice(0, 3)}`;
+
+                  return `
+                    <button
+                      class="ft-week-chip ${item.week === selectedTimelineWeek ? "active" : ""}"
+                      data-action="history-week"
+                      data-week="${item.week}"
+                      data-year="${timelineYear}"
+                    >
+                      <strong>CW${item.week}</strong>
+                      <span>${dateLabel}</span>
+                    </button>
+                  `;
+                }).join("")}
+              </div>
+
+            </div>
           </div>
 
           <h3 style="margin:8px 0 12px;">
@@ -2113,23 +2200,6 @@
 
       </div>
     `;
-
-    // Porta la settimana selezionata al centro della Timeline.
-    if (currentView === "history" && historyMode === "timeline") {
-      requestAnimationFrame(() => {
-        const activeWeek = challengeCard.querySelector(
-          ".ft-week-chip.active"
-        );
-
-        if (activeWeek) {
-          activeWeek.scrollIntoView({
-            behavior: "smooth",
-            block: "nearest",
-            inline: "center"
-          });
-        }
-      });
-    }
   }
 
   // --------------------------------------------------
@@ -2349,11 +2419,8 @@
 
         historyMonth = null;
 
-        const currentInfo = getISOWeekInfo(localDateString());
-
-        historyWeek = Number(historyYear) === currentInfo.year
-          ? currentInfo.week
-          : getISOWeekInfo(`${historyYear}-12-28`).week;
+        // La Timeline parte sempre dalla prima settimana dell'anno.
+        historyWeek = 1;
 
       } else {
         historyMode = "list";
@@ -2500,6 +2567,10 @@
         historyYear === null
       ) {
         historyYear = new Date().getFullYear();
+      }
+
+      if (historyMode === "timeline") {
+        historyWeek = 1;
       }
 
     } else if (kind === "month") {
