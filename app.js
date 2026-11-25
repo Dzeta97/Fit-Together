@@ -114,7 +114,7 @@
         id: "gym_2",
         title: "Seconda sessione palestra",
         description: "Allenamento in palestra",
-        icon: "💪"
+        icon: "🏋️"
       }
     ];
 
@@ -143,7 +143,6 @@
       ["running", "Corsa"],
       ["cycling", "Ciclismo"],
       ["trekking", "Trekking"],
-      ["walking", "Camminata"],
       ["swimming", "Nuoto"],
       ["skiing", "Sci"],
       ["other", "Altro"]
@@ -289,7 +288,6 @@
         font-size:13px;
       }
 
-      /* Pulsante Carica: dimensioni ridotte e allineamento a destra */
       .ft-slot .ft-button {
         width:auto;
         min-width:74px;
@@ -488,6 +486,18 @@
     const today = localDateString();
     const week = getWeekRange();
 
+    const isFreeSport = slot.id === "free_sport";
+
+    const fixedActivityType = slot.id.startsWith("gym")
+      ? "gym"
+      : slot.id === "run"
+        ? "running"
+        : null;
+
+    const fixedActivityLabel = fixedActivityType
+      ? activityLabel(fixedActivityType)
+      : "";
+
     challengeCard.innerHTML = `
       <div class="ft-dashboard">
         <div class="ft-panel">
@@ -504,16 +514,34 @@
           </p>
 
           <form id="ftWorkoutForm" class="ft-form">
-            <label>
-              Tipo di attività
-              <select name="activity_type" required>
-                ${activityOptions().map(option => `
-                  <option value="${option[0]}" ${option[0] === (slot.id.startsWith("gym") ? "gym" : slot.id === "run" ? "running" : "") ? "selected" : ""}>
-                    ${option[1]}
-                  </option>
-                `).join("")}
-              </select>
-            </label>
+
+            ${isFreeSport ? `
+              <label>
+                Tipo di attività
+                <select name="activity_type" required>
+                  <option value="" selected disabled>Seleziona attività</option>
+                  ${activityOptions().map(option => `
+                    <option value="${option[0]}">
+                      ${option[1]}
+                    </option>
+                  `).join("")}
+                </select>
+              </label>
+            ` : `
+              <label>
+                Tipo di attività
+                <input
+                  type="text"
+                  value="${escapeHtml(fixedActivityLabel)}"
+                  disabled
+                >
+                <input
+                  type="hidden"
+                  name="activity_type"
+                  value="${fixedActivityType}"
+                >
+              </label>
+            `}
 
             <label>
               Data allenamento
@@ -927,7 +955,6 @@
 
       const status = workout?.status || null;
 
-      // Stato visibile sotto il nome dell'attività
       const displayStatus = !workout
         ? "Da caricare"
         : statusLabel(status);
