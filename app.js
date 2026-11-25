@@ -729,14 +729,26 @@
         text-align:center;
       }
 
-      .ft-week-timeline {
-        display:flex;
-        gap:7px;
-        overflow-x:auto;
-        padding:8px 2px 14px;
-        scroll-snap-type:x mandatory;
-        -webkit-overflow-scrolling:touch;
-      }
+      .ft-week-timeline::-webkit-scrollbar-track {
+  background:#e8edf0;
+  border-radius:10px;
+}
+
+.ft-week-timeline::-webkit-scrollbar-thumb {
+  background:#89949f;
+  border-radius:10px;
+}
+
+.ft-week-timeline::-webkit-scrollbar-thumb:hover {
+  background:#66727e;
+}
+
+/* Impedisce al pannello Timeline di allargare l'app */
+.ft-panel:has(#ftWeekTimeline) {
+  min-width:0;
+  max-width:100%;
+  overflow:hidden;
+}
 
       .ft-week-chip {
         flex:0 0 86px;
