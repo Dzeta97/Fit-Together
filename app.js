@@ -4,6 +4,7 @@
   const client = window.fitTogetherSupabase;
   const BUCKET = "fit-together-proofs";
   const MAX_FILE_SIZE = 10 * 1024 * 1024;
+  const WEIGHT_BUCKET = "fit-together-weight-proofs";
 
   if (!client) {
     console.error("FIT TOGETHER: Supabase client non trovato.");
@@ -1508,12 +1509,12 @@
   // NOTIFICATIONS
   // --------------------------------------------------
 
-  function renderNotifications(notifications) {
-    if (!notifications.length) {
+  function renderNotifications(notifications, extraHtml = "") {
+    if (!notifications.length && !extraHtml) {
       return `<p class="ft-message">Non hai nuove notifiche.</p>`;
     }
 
-    return notifications.map(notification => `
+    return extraHtml + notifications.map(notification => `
       <button
         type="button"
         class="ft-notification-item unread"
@@ -1833,6 +1834,252 @@
   }
 
   // --------------------------------------------------
+  // FITNESS GOAL (PESO SETTIMANALE)
+  // --------------------------------------------------
+
+  function fmtKg(value) {
+    return Number(value).toFixed(1).replace(".", ",");
+  }
+
+  function renderWeightChart(entries, goal) {
+    if (!entries.length) {
+      return `<p class="ft-message">Registra il primo peso per vedere il trend.</p>`;
+    }
+
+    const width = 680;
+    const height = 250;
+    const left = 46;
+    const right = 16;
+    const top = 18;
+    const bottom = 42;
+    const plotWidth = width - left - right;
+    const plotHeight = height - top - bottom;
+
+    const values = entries.map(item => Number(item.weight_kg));
+    if (goal !== null) values.push(goal);
+
+    const minValue = Math.floor(Math.min(...values) - 1);
+    const maxValue = Math.ceil(Math.max(...values) + 1);
+    const span = Math.max(1, maxValue - minValue);
+
+    const yFor = value =>
+      top + plotHeight - ((value - minValue) / span) * plotHeight;
+
+    const stepX = entries.length > 1 ? plotWidth / (entries.length - 1) : 0;
+
+    const coordinates = entries.map((item, index) => ({
+      x: entries.length > 1 ? left + index * stepX : left + plotWidth / 2,
+      y: yFor(Number(item.weight_kg)),
+      value: Number(item.weight_kg),
+      label: `CW${getISOWeekInfo(item.week_start).week}`
+    }));
+
+    const polyline = coordinates
+      .map(point => `${point.x},${point.y}`)
+      .join(" ");
+
+    const labelEvery = Math.max(1, Math.ceil(entries.length / 7));
+
+    const grid = Array.from({ length: 4 }, (_, index) => {
+      const value = maxValue - (span * index) / 3;
+      const y = top + (plotHeight / 3) * index;
+
+      return `
+        <line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}"
+          stroke="var(--border-color,#e1e5eb)" stroke-dasharray="3 4"/>
+        <text x="${left - 9}" y="${y + 4}" text-anchor="end"
+          font-size="10" fill="var(--text-muted,#718096)">${fmtKg(value)}</text>
+      `;
+    }).join("");
+
+    const targetLine = goal !== null ? `
+      <line x1="${left}" y1="${yFor(goal)}" x2="${width - right}" y2="${yFor(goal)}"
+        stroke="#e6a23c" stroke-width="2.5" stroke-dasharray="7 5"/>
+      <text x="${width - right}" y="${yFor(goal) - 7}" text-anchor="end"
+        font-size="10" font-weight="700" fill="#b27a12">Obiettivo ${fmtKg(goal)} kg</text>
+    ` : "";
+
+    const dots = coordinates.map(point => `
+      <circle cx="${point.x}" cy="${point.y}" r="4"
+        fill="#168b68" stroke="var(--card-bg,#fff)" stroke-width="1.5">
+        <title>${escapeHtml(point.label)}: ${fmtKg(point.value)} kg</title>
+      </circle>
+    `).join("");
+
+    const labels = coordinates.map((point, index) => {
+      if (
+        index % labelEvery !== 0 &&
+        index !== coordinates.length - 1
+      ) return "";
+
+      return `
+        <text x="${point.x}" y="${height - 13}" text-anchor="middle"
+          font-size="10" fill="var(--text-muted,#718096)">
+          ${escapeHtml(point.label)}
+        </text>
+      `;
+    }).join("");
+
+    return `
+      <div class="ft-stats-chart">
+        <svg viewBox="0 0 ${width} ${height}" role="img"
+          aria-label="Andamento del peso rispetto all'obiettivo">
+          ${grid}
+          ${targetLine}
+          <polyline points="${polyline}" fill="none" stroke="#168b68"
+            stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          ${dots}
+          ${labels}
+        </svg>
+      </div>
+
+      <div class="ft-stats-note" style="display:flex;gap:16px;flex-wrap:wrap;">
+        <span><strong style="color:#168b68;">━</strong> Peso settimanale</span>
+        ${goal !== null
+          ? `<span><strong style="color:#e6a23c;">╍</strong> Obiettivo</span>`
+          : ""}
+      </div>
+    `;
+  }
+
+  async function submitWeight(event) {
+    event.preventDefault();
+
+    const form = event.target;
+    const button = form.querySelector('button[type="submit"]');
+    const errorBox = document.getElementById("ftWeightError");
+    const formData = new FormData(form);
+
+    const weight = Number(
+      String(formData.get("weight_kg") || "").replace(",", ".")
+    );
+    const file = formData.get("proof");
+
+    errorBox.textContent = "";
+
+    if (!weight || weight < 20 || weight > 400) {
+      errorBox.textContent = "Inserisci un peso valido (in kg).";
+      return;
+    }
+
+    if (!file || !file.size) {
+      errorBox.textContent = "Seleziona una foto di prova.";
+      return;
+    }
+
+    if (file.size > MAX_FILE_SIZE) {
+      errorBox.textContent = "La foto supera il limite di 10 MB.";
+      return;
+    }
+
+    const allowedTypes = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/heic",
+      "image/heif"
+    ];
+
+    if (!allowedTypes.includes(file.type)) {
+      errorBox.textContent = "Formato immagine non supportato.";
+      return;
+    }
+
+    button.disabled = true;
+    button.textContent = "Caricamento...";
+
+    let uploadedPath = null;
+
+    try {
+      const extension = file.name.split(".").pop().toLowerCase();
+      uploadedPath = `${currentUser.id}/${crypto.randomUUID()}.${extension}`;
+
+      const { error: uploadError } = await client.storage
+        .from(WEIGHT_BUCKET)
+        .upload(uploadedPath, file, {
+          contentType: file.type,
+          upsert: false
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { error: insertError } = await client
+        .from("weight_entries")
+        .insert({
+          challenge_id: currentMember.challenge_id,
+          member_id: currentMember.id,
+          entry_date: localDateString(),
+          weight_kg: weight,
+          proof_path: uploadedPath
+        });
+
+      if (insertError) throw insertError;
+
+      alert("Peso registrato!");
+      currentView = "fitness-goal";
+      await loadDashboard(currentUser);
+
+    } catch (error) {
+      console.error("FIT TOGETHER weight upload error:", error);
+
+      if (uploadedPath) {
+        await client.storage.from(WEIGHT_BUCKET).remove([uploadedPath]);
+      }
+
+      errorBox.textContent = error.code === "23505"
+        ? "Hai già registrato il peso per questa settimana."
+        : (error.message || "Errore durante il caricamento.");
+
+      button.disabled = false;
+      button.textContent = "Registra peso";
+    }
+  }
+
+  async function deleteWeight(entryId) {
+    if (!confirm(
+      "Vuoi davvero eliminare il peso di questa settimana?\n\nIl dato e la foto saranno cancellati e potrai registrarlo di nuovo."
+    )) {
+      return;
+    }
+
+    try {
+      const { data: deletedRows, error } = await client
+        .from("weight_entries")
+        .delete()
+        .eq("id", entryId)
+        .eq("member_id", currentMember.id)
+        .select("id, proof_path");
+
+      if (error) throw error;
+
+      if (!deletedRows || deletedRows.length === 0) {
+        throw new Error("Non è stato possibile eliminare il peso.");
+      }
+
+      const proofPath = deletedRows[0].proof_path;
+
+      if (proofPath) {
+        const { error: storageError } = await client.storage
+          .from(WEIGHT_BUCKET)
+          .remove([proofPath]);
+
+        if (storageError) {
+          console.error(
+            "FIT TOGETHER: peso eliminato, ma errore nella cancellazione della foto:",
+            storageError
+          );
+        }
+      }
+
+      await loadDashboard(currentUser);
+
+    } catch (error) {
+      console.error("FIT TOGETHER delete weight error:", error);
+      alert("Errore durante l'eliminazione: " + error.message);
+    }
+  }
+
+  // --------------------------------------------------
   // DASHBOARD
   // --------------------------------------------------
 
@@ -1847,6 +2094,71 @@
     historyWorkouts,
     statsWorkouts
   ) {
+    // Dati "Obiettivo fitness": se la tabella non esiste ancora, il resto dell'app funziona comunque
+    let weightEntries = [];
+    let weightGoal = null;
+    let weightReady = false;
+
+    try {
+      const [entriesResult, goalResult] = await Promise.all([
+        client
+          .from("weight_entries")
+          .select("id, member_id, entry_date, week_start, weight_kg, proof_path, created_at")
+          .eq("member_id", ownMember.id)
+          .order("week_start", { ascending: true }),
+
+        client
+          .from("challenge_members")
+          .select("goal_weight_kg")
+          .eq("id", ownMember.id)
+          .maybeSingle()
+      ]);
+
+      if (entriesResult.error) {
+        console.warn("FIT TOGETHER: peso non disponibile:", entriesResult.error.message);
+      } else {
+        weightEntries = entriesResult.data || [];
+        weightReady = true;
+      }
+
+      if (
+        !goalResult.error &&
+        goalResult.data &&
+        goalResult.data.goal_weight_kg !== null &&
+        goalResult.data.goal_weight_kg !== undefined
+      ) {
+        weightGoal = Number(goalResult.data.goal_weight_kg);
+      }
+    } catch (error) {
+      console.warn("FIT TOGETHER: errore lettura peso:", error);
+    }
+
+    const thisWeekWeight = weightEntries.find(
+      item => item.week_start === week.start
+    ) || null;
+
+    // Promemoria in-app: compare dal lunedì finché il peso della settimana non è registrato
+    const weightReminder = weightReady && !thisWeekWeight;
+
+    const reminderHtml = weightReminder ? `
+      <button
+        type="button"
+        class="ft-notification-item unread"
+        style="display:block;width:100%;text-align:left;background:transparent;color:inherit;border:0;cursor:pointer;font:inherit;"
+        data-action="open-weight-reminder"
+      >
+        <div>⚖️ Registrazione peso settimanale attesa</div>
+
+        <p style="margin:5px 0;">
+          Registra il tuo peso di questa settimana e carica la foto di prova.
+        </p>
+
+        <div class="ft-small">
+          CW${getISOWeekInfo(week.start).week} · Nuova · Tocca per aprire
+        </div>
+      </button>
+    ` : "";
+
     const workoutCounts = {};
 
     members.forEach(member => {
@@ -1857,7 +2169,7 @@
     });
 
     const approvedCount = workoutCounts[ownMember.id] || 0;
-    const unreadCount = notifications.length;
+    const unreadCount = notifications.length + (weightReminder ? 1 : 0);
 
     const memberCards = members.map(member => {
       const count = workoutCounts[member.id] || 0;
@@ -1984,6 +2296,232 @@
       } else {
         await renderWorkoutDetails(workout);
         return;
+      }
+
+    // --------------------------------------------------
+    // FITNESS GOAL
+    // --------------------------------------------------
+
+    } else if (currentView === "fitness-goal") {
+
+      if (!weightReady) {
+        pageContent = `
+          <div class="ft-panel">
+            <h2 class="ft-page-title">⚖️ Obiettivo fitness</h2>
+            <p class="ft-message">
+              Questa sezione non è ancora attiva: il database deve essere configurato.
+            </p>
+          </div>
+        `;
+      } else {
+        const latestWeight = weightEntries.length
+          ? Number(weightEntries[weightEntries.length - 1].weight_kg)
+          : null;
+
+        const firstWeight = weightEntries.length
+          ? Number(weightEntries[0].weight_kg)
+          : null;
+
+        let thisWeekPhotoUrl = null;
+
+        if (thisWeekWeight && thisWeekWeight.proof_path) {
+          const { data: signed } = await client.storage
+            .from(WEIGHT_BUCKET)
+            .createSignedUrl(thisWeekWeight.proof_path, 3600);
+
+          thisWeekPhotoUrl = signed?.signedUrl || null;
+        }
+
+        const weekInfo = getISOWeekInfo(week.start);
+
+        const weekSectionHtml = thisWeekWeight ? `
+          <div class="ft-detail-row">
+            <span class="ft-detail-label">Peso registrato</span>
+            <strong class="ft-detail-value">${fmtKg(thisWeekWeight.weight_kg)} kg</strong>
+          </div>
+
+          <div class="ft-detail-row">
+            <span class="ft-detail-label">Data</span>
+            <span class="ft-detail-value">${formatDate(thisWeekWeight.entry_date)}</span>
+          </div>
+
+          ${thisWeekPhotoUrl ? `
+            <a href="${escapeHtml(thisWeekPhotoUrl)}" target="_blank" rel="noopener">
+              <img
+                class="ft-detail-photo"
+                src="${escapeHtml(thisWeekPhotoUrl)}"
+                alt="Foto di prova del peso"
+              >
+            </a>
+          ` : ""}
+
+          <button
+            class="ft-button ft-secondary"
+            style="width:100%;margin-top:14px;"
+            data-action="delete-weight"
+            data-id="${escapeHtml(thisWeekWeight.id)}"
+          >
+            Elimina e registra di nuovo
+          </button>
+        ` : `
+          <form id="ftWeightForm" class="ft-form">
+            <label>
+              Peso (kg)
+              <input
+                type="number"
+                name="weight_kg"
+                inputmode="decimal"
+                min="20"
+                max="400"
+                step="0.1"
+                placeholder="Es. 78.5"
+                required
+              >
+            </label>
+
+            <label>
+              Foto di prova (bilancia)
+              <input
+                type="file"
+                name="proof"
+                accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                required
+              >
+            </label>
+
+            <p class="ft-message">
+              Formati supportati: JPG, PNG, WEBP e HEIC. Dimensione massima: 10 MB.
+            </p>
+
+            <p id="ftWeightError" class="ft-error"></p>
+
+            <button class="ft-button ft-primary" type="submit">
+              Registra peso
+            </button>
+          </form>
+        `;
+
+        let goalSectionHtml = "";
+
+        if (weightGoal === null) {
+          goalSectionHtml = `
+            <p class="ft-message">
+              Il tuo obiettivo non è ancora stato impostato.
+            </p>
+          `;
+        } else {
+          let diffKpi = "—";
+          let diffPctKpi = "—";
+          let statusText = "Registra il tuo primo peso per vedere la distanza dall'obiettivo.";
+          let diffColor = "inherit";
+
+          if (latestWeight !== null) {
+            const diff = latestWeight - weightGoal;
+            const absDiff = Math.abs(diff);
+            const sign = diff > 0 ? "+" : "−";
+
+            if (absDiff < 0.05) {
+              diffKpi = "0,0 kg";
+              diffPctKpi = "0,0%";
+              diffColor = "#168b68";
+              statusText = "Obiettivo raggiunto! 🎉";
+            } else {
+              diffKpi = `${sign}${fmtKg(absDiff)} kg`;
+              diffPctKpi = `${sign}${fmtKg(absDiff / weightGoal * 100)}%`;
+              diffColor = "#c34d5b";
+
+              statusText = diff > 0
+                ? `Ti mancano ${fmtKg(absDiff)} kg per arrivare all'obiettivo.`
+                : `Sei ${fmtKg(absDiff)} kg sotto l'obiettivo.`;
+            }
+          }
+
+          let progressHtml = "";
+
+          if (
+            weightEntries.length >= 2 &&
+            firstWeight !== null &&
+            latestWeight !== null &&
+            firstWeight !== weightGoal
+          ) {
+            const progress = Math.max(0, Math.min(
+              100,
+              (firstWeight - latestWeight) / (firstWeight - weightGoal) * 100
+            ));
+
+            progressHtml = `
+              <div style="margin-top:16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                  <strong>Avanzamento verso l'obiettivo</strong>
+                  <strong>${Math.round(progress)}%</strong>
+                </div>
+
+                <div class="ft-progress">
+                  <div class="ft-progress-fill" style="width:${progress}%;"></div>
+                </div>
+
+                <p class="ft-subtitle">
+                  Calcolato dal primo peso registrato (${fmtKg(firstWeight)} kg).
+                </p>
+              </div>
+            `;
+          }
+
+          goalSectionHtml = `
+            <div class="ft-stats-kpis">
+              <div class="ft-stats-kpi">
+                <div class="ft-stats-kpi-label">Il tuo obiettivo</div>
+                <div class="ft-stats-kpi-value">${fmtKg(weightGoal)} kg</div>
+              </div>
+
+              <div class="ft-stats-kpi">
+                <div class="ft-stats-kpi-label">Peso attuale</div>
+                <div class="ft-stats-kpi-value">
+                  ${latestWeight === null ? "—" : `${fmtKg(latestWeight)} kg`}
+                </div>
+              </div>
+
+              <div class="ft-stats-kpi">
+                <div class="ft-stats-kpi-label">Differenza (kg)</div>
+                <div class="ft-stats-kpi-value" style="color:${diffColor};">${diffKpi}</div>
+              </div>
+
+              <div class="ft-stats-kpi">
+                <div class="ft-stats-kpi-label">Differenza (%)</div>
+                <div class="ft-stats-kpi-value" style="color:${diffColor};">${diffPctKpi}</div>
+              </div>
+            </div>
+
+            <p class="ft-message" style="margin-top:14px;">${escapeHtml(statusText)}</p>
+
+            ${progressHtml}
+          `;
+        }
+
+        pageContent = `
+          <div class="ft-panel">
+            <h2 class="ft-page-title">⚖️ Obiettivo fitness</h2>
+            <p class="ft-subtitle">
+              Registra il tuo peso ogni settimana, a partire dal lunedì mattina.
+            </p>
+
+            <h3 style="margin:25px 0 5px;">Peso della settimana</h3>
+            <p class="ft-subtitle">
+              CW${weekInfo.week} · ${formatDate(week.start)} – ${formatDate(week.end)}
+            </p>
+
+            ${weekSectionHtml}
+
+            <h3 style="margin:30px 0 5px;">Il tuo obiettivo</h3>
+            ${goalSectionHtml}
+
+            <h3 style="margin:30px 0 5px;">Trend del peso</h3>
+            <p class="ft-subtitle">
+              Il tuo peso settimana dopo settimana rispetto all'obiettivo.
+            </p>
+            ${renderWeightChart(weightEntries, weightGoal)}
+          </div>
+        `;
       }
 
     // --------------------------------------------------
@@ -2745,6 +3283,13 @@
                   📊 Statistiche sport
                 </button>
 
+                <button
+                  class="ft-menu-item ${currentView === "fitness-goal" ? "active" : ""}"
+                  data-action="nav-fitness"
+                >
+                  ⚖️ Obiettivo fitness
+                </button>
+
                 <div class="ft-menu-divider"></div>
 
                 <button class="ft-menu-item" data-action="logout">
@@ -2769,7 +3314,7 @@
             </button>
           </div>
 
-          ${renderNotifications(notifications)}
+          ${renderNotifications(notifications, reminderHtml)}
 
         </div>
 
@@ -2914,7 +3459,9 @@
       }
 
       notificationRefreshTimer = setInterval(() => {
-        const workoutFormOpen = document.getElementById("ftWorkoutForm");
+        const workoutFormOpen =
+          document.getElementById("ftWorkoutForm") ||
+          document.getElementById("ftWeightForm");
 
         if (currentUser && !loading && !workoutFormOpen) {
           loadDashboard(currentUser);
@@ -3004,6 +3551,18 @@
       currentView = "rules";
       selectedWorkoutId = null;
       await loadDashboard(currentUser);
+      return;
+    }
+
+    if (action === "nav-fitness" || action === "open-weight-reminder") {
+      currentView = "fitness-goal";
+      selectedWorkoutId = null;
+      await loadDashboard(currentUser);
+      return;
+    }
+
+    if (action === "delete-weight") {
+      await deleteWeight(button.dataset.id);
       return;
     }
 
@@ -3207,6 +3766,16 @@
     }
 
     await loadDashboard(currentUser);
+  });
+
+  // --------------------------------------------------
+  // WEIGHT FORM SUBMIT
+  // --------------------------------------------------
+
+  challengeCard.addEventListener("submit", event => {
+    if (event.target && event.target.id === "ftWeightForm") {
+      submitWeight(event);
+    }
   });
 
   // --------------------------------------------------
