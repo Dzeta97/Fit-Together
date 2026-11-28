@@ -1754,21 +1754,30 @@
     return { approved, points };
   }
 
+  // Calcolo di sessioni completate / saltate / in attesa.
+  // - Si parte dalla settimana più antica tra iscrizione e primo allenamento registrato.
+  // - Le settimane concluse contano come "saltate" se lo slot non ha un allenamento approvato.
+  // - La settimana in corso conta solo le sessioni completate o in attesa:
+  //   le sessioni mancanti non sono ancora considerate saltate.
   function calculateMissedSessions(allWorkouts, ownMember, range) {
-    const joinedAt = ownMember.joined_at
-      ? localDateString(new Date(ownMember.joined_at))
-      : (allWorkouts.length
-          ? allWorkouts
-              .map(item => item.activity_date)
-              .sort()[0]
-          : range.start);
-
-    const joinedInfo = getISOWeekInfo(joinedAt);
-    const joinedWeek = getISOWeekRange(joinedInfo.year, joinedInfo.week);
-    let monday = addDaysToDate(joinedWeek.end, 1);
-
     const currentWeekStart = getWeekRange().start;
-    const lastCompletedSunday = addDaysToDate(currentWeekStart, -1);
+
+    const candidates = [];
+
+    if (ownMember.joined_at) {
+      candidates.push(localDateString(new Date(ownMember.joined_at)));
+    }
+
+    allWorkouts.forEach(workout => {
+      if (workout.activity_date) candidates.push(workout.activity_date);
+    });
+
+    const firstDate = candidates.length
+      ? candidates.sort()[0]
+      : currentWeekStart;
+
+    const firstInfo = getISOWeekInfo(firstDate);
+    let monday = getISOWeekRange(firstInfo.year, firstInfo.week).start;
 
     const result = {
       completed: 0,
@@ -1777,10 +1786,11 @@
       weeks: 0
     };
 
-    while (monday <= lastCompletedSunday) {
+    while (monday <= currentWeekStart) {
       const info = getISOWeekInfo(monday);
       const weekRange = getISOWeekRange(info.year, info.week);
       const sunday = weekRange.end;
+      const isCurrentWeek = weekRange.start === currentWeekStart;
 
       let includeWeek = sunday >= range.start && sunday <= range.end;
 
@@ -1810,7 +1820,7 @@
             result.completed++;
           } else if (slotEntries.some(item => item.status === "pending")) {
             result.pending++;
-          } else {
+          } else if (!isCurrentWeek) {
             result.missed++;
           }
         });
@@ -2030,6 +2040,9 @@
         0
       );
 
+      // La distanza totale viene mostrata solo a chi ha la corsa come sport obbligatorio
+      const showDistance = ownMember.weekly_plan === "runner";
+
       const attendance = calculateMissedSessions(
         allStatsWorkouts,
         ownMember,
@@ -2155,10 +2168,12 @@
             </div>
           </div>
 
-          <div class="ft-stats-kpi" style="margin-top:10px;">
-            <div class="ft-stats-kpi-label">Distanza totale registrata</div>
-            <div class="ft-stats-kpi-value">${distance.toFixed(1).replace(".", ",")} km</div>
-          </div>
+          ${showDistance ? `
+            <div class="ft-stats-kpi" style="margin-top:10px;">
+              <div class="ft-stats-kpi-label">Distanza totale registrata</div>
+              <div class="ft-stats-kpi-value">${distance.toFixed(1).replace(".", ",")} km</div>
+            </div>
+          ` : ""}
 
           <h3 style="margin:25px 0 5px;">Trend attività</h3>
           <p class="ft-subtitle">
@@ -2171,33 +2186,6 @@
             Distribuzione degli sport praticati nel periodo selezionato.
           </p>
           ${renderStatsPieChart(filteredStatsWorkouts)}
-
-          <h3 style="margin:25px 0 5px;">Costanza e sessioni saltate</h3>
-          <div class="ft-detail-row">
-            <span class="ft-detail-label">Sessioni completate</span>
-            <strong class="ft-detail-value">${attendance.completed}</strong>
-          </div>
-          <div class="ft-detail-row">
-            <span class="ft-detail-label">Sessioni saltate</span>
-            <strong class="ft-detail-value">${attendance.missed}</strong>
-          </div>
-          <div class="ft-detail-row">
-            <span class="ft-detail-label">In attesa di approvazione</span>
-            <strong class="ft-detail-value">${attendance.pending}</strong>
-          </div>
-          <div class="ft-detail-row">
-            <span class="ft-detail-label">Settimane complete analizzate</span>
-            <strong class="ft-detail-value">${attendance.weeks}</strong>
-          </div>
-
-          <p class="ft-stats-note">
-            Le statistiche utilizzano soltanto gli allenamenti approvati.
-            Le sessioni previste vengono conteggiate dalla prima settimana
-            completa successiva alla tua iscrizione. Le settimane ancora in
-            corso non vengono considerate nel calcolo delle sessioni saltate.
-            Le sessioni in attesa di approvazione restano separate e non vengono
-            considerate né completate né saltate.
-          </p>
         </div>
       `;
 
