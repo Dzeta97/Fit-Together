@@ -1841,6 +1841,29 @@
     return Number(value).toFixed(1).replace(".", ",");
   }
 
+  // Il promemoria del lunedì compare dalle 06:00 del lunedì e resta finché non viene aperto.
+  const WEIGHT_REMINDER_HOUR = 6;
+
+  function weightReminderStorageKey() {
+    return `fitTogether.weightReminderRead.${currentUser?.id || "user"}`;
+  }
+
+  function isWeightReminderRead(weekStart) {
+    try {
+      return localStorage.getItem(weightReminderStorageKey()) === weekStart;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function markWeightReminderRead(weekStart) {
+    try {
+      localStorage.setItem(weightReminderStorageKey(), weekStart);
+    } catch (error) {
+      console.warn("FIT TOGETHER: impossibile salvare lo stato del promemoria:", error);
+    }
+  }
+
   function renderWeightChart(entries, goal) {
     if (!entries.length) {
       return `<p class="ft-message">Registra il primo peso per vedere il trend.</p>`;
@@ -1953,7 +1976,6 @@
     const weight = Number(
       String(formData.get("weight_kg") || "").replace(",", ".")
     );
-    const file = formData.get("proof");
 
     errorBox.textContent = "";
 
@@ -1962,55 +1984,17 @@
       return;
     }
 
-    if (!file || !file.size) {
-      errorBox.textContent = "Seleziona una foto di prova.";
-      return;
-    }
-
-    if (file.size > MAX_FILE_SIZE) {
-      errorBox.textContent = "La foto supera il limite di 10 MB.";
-      return;
-    }
-
-    const allowedTypes = [
-      "image/jpeg",
-      "image/png",
-      "image/webp",
-      "image/heic",
-      "image/heif"
-    ];
-
-    if (!allowedTypes.includes(file.type)) {
-      errorBox.textContent = "Formato immagine non supportato.";
-      return;
-    }
-
     button.disabled = true;
-    button.textContent = "Caricamento...";
-
-    let uploadedPath = null;
+    button.textContent = "Salvataggio...";
 
     try {
-      const extension = file.name.split(".").pop().toLowerCase();
-      uploadedPath = `${currentUser.id}/${crypto.randomUUID()}.${extension}`;
-
-      const { error: uploadError } = await client.storage
-        .from(WEIGHT_BUCKET)
-        .upload(uploadedPath, file, {
-          contentType: file.type,
-          upsert: false
-        });
-
-      if (uploadError) throw uploadError;
-
       const { error: insertError } = await client
         .from("weight_entries")
         .insert({
           challenge_id: currentMember.challenge_id,
           member_id: currentMember.id,
           entry_date: localDateString(),
-          weight_kg: weight,
-          proof_path: uploadedPath
+          weight_kg: weight
         });
 
       if (insertError) throw insertError;
@@ -2020,15 +2004,11 @@
       await loadDashboard(currentUser);
 
     } catch (error) {
-      console.error("FIT TOGETHER weight upload error:", error);
-
-      if (uploadedPath) {
-        await client.storage.from(WEIGHT_BUCKET).remove([uploadedPath]);
-      }
+      console.error("FIT TOGETHER weight insert error:", error);
 
       errorBox.textContent = error.code === "23505"
         ? "Hai già registrato il peso per questa settimana."
-        : (error.message || "Errore durante il caricamento.");
+        : (error.message || "Errore durante il salvataggio.");
 
       button.disabled = false;
       button.textContent = "Registra peso";
@@ -2138,7 +2118,13 @@
     ) || null;
 
     // Promemoria in-app: compare dal lunedì finché il peso della settimana non è registrato
-    const weightReminder = weightReady && !thisWeekWeight;
+    const mondayMorning = new Date(`${week.start}T${String(WEIGHT_REMINDER_HOUR).padStart(2, "0")}:00:00`);
+
+    const weightReminder =
+      weightReady &&
+      !thisWeekWeight &&
+      new Date() >= mondayMorning &&
+      !isWeightReminderRead(week.start);
 
     const reminderHtml = weightReminder ? `
       <button
@@ -2150,7 +2136,7 @@
         <div>⚖️ Registrazione peso settimanale attesa</div>
 
         <p style="margin:5px 0;">
-          Registra il tuo peso di questa settimana e carica la foto di prova.
+          Registra il tuo peso di questa settimana.
         </p>
 
         <div class="ft-small">
@@ -2322,16 +2308,6 @@
           ? Number(weightEntries[0].weight_kg)
           : null;
 
-        let thisWeekPhotoUrl = null;
-
-        if (thisWeekWeight && thisWeekWeight.proof_path) {
-          const { data: signed } = await client.storage
-            .from(WEIGHT_BUCKET)
-            .createSignedUrl(thisWeekWeight.proof_path, 3600);
-
-          thisWeekPhotoUrl = signed?.signedUrl || null;
-        }
-
         const weekInfo = getISOWeekInfo(week.start);
 
         const weekSectionHtml = thisWeekWeight ? `
@@ -2344,16 +2320,6 @@
             <span class="ft-detail-label">Data</span>
             <span class="ft-detail-value">${formatDate(thisWeekWeight.entry_date)}</span>
           </div>
-
-          ${thisWeekPhotoUrl ? `
-            <a href="${escapeHtml(thisWeekPhotoUrl)}" target="_blank" rel="noopener">
-              <img
-                class="ft-detail-photo"
-                src="${escapeHtml(thisWeekPhotoUrl)}"
-                alt="Foto di prova del peso"
-              >
-            </a>
-          ` : ""}
 
           <button
             class="ft-button ft-secondary"
@@ -2378,20 +2344,6 @@
                 required
               >
             </label>
-
-            <label>
-              Foto di prova (bilancia)
-              <input
-                type="file"
-                name="proof"
-                accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-                required
-              >
-            </label>
-
-            <p class="ft-message">
-              Formati supportati: JPG, PNG, WEBP e HEIC. Dimensione massima: 10 MB.
-            </p>
 
             <p id="ftWeightError" class="ft-error"></p>
 
@@ -2428,7 +2380,11 @@
             } else {
               diffKpi = `${sign}${fmtKg(absDiff)} kg`;
               diffPctKpi = `${sign}${fmtKg(absDiff / weightGoal * 100)}%`;
-              diffColor = "#c34d5b";
+              diffColor = absDiff < 2
+                ? "#168b68"
+                : absDiff <= 5
+                  ? "#d98200"
+                  : "#c34d5b";
 
               statusText = diff > 0
                 ? `Ti mancano ${fmtKg(absDiff)} kg per arrivare all'obiettivo.`
@@ -3555,6 +3511,7 @@
     }
 
     if (action === "nav-fitness" || action === "open-weight-reminder") {
+      markWeightReminderRead(getWeekRange().start);
       currentView = "fitness-goal";
       selectedWorkoutId = null;
       await loadDashboard(currentUser);
