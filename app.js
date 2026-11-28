@@ -1917,9 +1917,9 @@
 
     const targetLine = goal !== null ? `
       <line x1="${left}" y1="${yFor(goal)}" x2="${width - right}" y2="${yFor(goal)}"
-        stroke="#e6a23c" stroke-width="2.5" stroke-dasharray="7 5"/>
+        stroke="#2bb673" stroke-width="2.5" stroke-dasharray="7 5"/>
       <text x="${width - right}" y="${yFor(goal) - 7}" text-anchor="end"
-        font-size="10" font-weight="700" fill="#b27a12">Obiettivo ${fmtKg(goal)} kg</text>
+        font-size="10" font-weight="700" fill="#1f8f5a">Obiettivo ${fmtKg(goal)} kg</text>
     ` : "";
 
     const dots = coordinates.map(point => `
@@ -1959,7 +1959,7 @@
       <div class="ft-stats-note" style="display:flex;gap:16px;flex-wrap:wrap;">
         <span><strong style="color:#168b68;">━</strong> Peso settimanale</span>
         ${goal !== null
-          ? `<span><strong style="color:#e6a23c;">╍</strong> Obiettivo</span>`
+          ? `<span><strong style="color:#2bb673;">╍</strong> Obiettivo</span>`
           : ""}
       </div>
     `;
@@ -2458,7 +2458,7 @@
           <div class="ft-panel">
             <h2 class="ft-page-title">⚖️ Obiettivo fitness</h2>
             <p class="ft-subtitle">
-              Registra il tuo peso ogni settimana, a partire dal lunedì mattina.
+              Registra il tuo peso ogni settimana, il lunedì mattina.
             </p>
 
             <h3 style="margin:25px 0 5px;">Peso della settimana</h3>
