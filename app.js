@@ -39,6 +39,9 @@
   let statsMonth = new Date().getMonth() + 1;
   let statsWeek = getISOWeekInfo(localDateString()).week;
 
+  // Giorno selezionato nella sezione Nutrizione
+  let nutritionDate = localDateString();
+
   // --------------------------------------------------
   // UTILITIES
   // --------------------------------------------------
@@ -970,6 +973,137 @@
 
       .ft-rule-card.info {
         background:rgba(70,140,220,.10);
+      }
+
+      /* NUTRIZIONE */
+
+      .ft-nutri-row {
+        margin-top:16px;
+      }
+
+      .ft-nutri-label {
+        font-weight:700;
+        font-size:14px;
+        margin-bottom:7px;
+      }
+
+      .ft-nutri-options {
+        display:grid;
+        grid-template-columns:repeat(3,minmax(0,1fr));
+        gap:8px;
+      }
+
+      .ft-form .ft-nutri-option {
+        display:block;
+        position:relative;
+        cursor:pointer;
+        font-weight:700;
+      }
+
+      .ft-form .ft-nutri-option input {
+        position:absolute;
+        opacity:0;
+        pointer-events:none;
+        width:1px;
+        height:1px;
+        padding:0;
+        border:0;
+      }
+
+      .ft-nutri-option span {
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        gap:3px;
+        padding:10px 4px;
+        border:1px solid var(--border-color,#d5dbe2);
+        border-radius:11px;
+        font-size:11px;
+        font-weight:700;
+        text-align:center;
+        line-height:1.2;
+        transition:background .15s ease, border-color .15s ease;
+      }
+
+      .ft-nutri-option span b {
+        font-size:20px;
+        font-weight:400;
+      }
+
+      .ft-form .ft-nutri-option input:focus-visible + span {
+        outline:2px solid #168b68;
+        outline-offset:2px;
+      }
+
+      .ft-form .ft-nutri-option.v1 input:checked + span {
+        background:#c34d5b;
+        border-color:#c34d5b;
+        color:#fff;
+      }
+
+      .ft-form .ft-nutri-option.v2 input:checked + span {
+        background:#d98200;
+        border-color:#d98200;
+        color:#fff;
+      }
+
+      .ft-form .ft-nutri-option.v3 input:checked + span {
+        background:#168b68;
+        border-color:#168b68;
+        color:#fff;
+      }
+
+      .ft-nutri-days {
+        display:grid;
+        grid-template-columns:repeat(7,minmax(0,1fr));
+        gap:6px;
+        margin-top:14px;
+      }
+
+      .ft-nutri-day {
+        text-align:center;
+        padding:8px 2px;
+        border:1px solid var(--border-color,#e1e5eb);
+        border-radius:10px;
+        font-size:10px;
+        color:var(--text-muted,#718096);
+      }
+
+      .ft-nutri-day strong {
+        display:block;
+        margin-top:3px;
+        font-size:11px;
+      }
+
+      .ft-nutri-day.red {
+        background:rgba(195,77,91,.12);
+        border-color:rgba(195,77,91,.35);
+        color:#b42332;
+      }
+
+      .ft-nutri-day.green {
+        background:rgba(48,181,139,.14);
+        border-color:rgba(48,181,139,.4);
+        color:#14764f;
+      }
+
+      .ft-nutri-banner {
+        margin-top:14px;
+        padding:13px 15px;
+        border-radius:12px;
+        font-size:13px;
+        line-height:1.5;
+        font-weight:650;
+      }
+
+      .ft-nutri-banner.red {
+        background:rgba(195,77,91,.12);
+        color:#b42332;
+      }
+
+      .ft-nutri-banner.green {
+        background:rgba(48,181,139,.14);
+        color:#14764f;
       }
 
       .ft-hidden {
@@ -2060,6 +2194,253 @@
   }
 
   // --------------------------------------------------
+  // NUTRIZIONE
+  // --------------------------------------------------
+
+  // Una settimana è ROSSA se la media è sotto NUTRITION_MIN_AVERAGE
+  // oppure se i pasti con voto 1 (unhealthy) superano NUTRITION_MAX_UNHEALTHY.
+  const NUTRITION_MIN_AVERAGE = 2;
+  const NUTRITION_MAX_UNHEALTHY = 4;
+
+  const NUTRITION_FIELDS = [
+    { key: "breakfast", label: "Colazione", icon: "🥐" },
+    { key: "lunch", label: "Pranzo", icon: "🍝" },
+    { key: "dinner", label: "Cena", icon: "🍽️" },
+    { key: "snacks", label: "Snacks", icon: "🍎" }
+  ];
+
+  function fmtScore(value) {
+    return Number(value).toFixed(2).replace(".", ",");
+  }
+
+  // Media dei 4 voti del giorno. Giorno non registrato = 2 su tutti i campi.
+  function nutritionDayScore(entry) {
+    if (!entry) return 2;
+
+    return NUTRITION_FIELDS.reduce(
+      (sum, field) => sum + Number(entry[field.key] || 2),
+      0
+    ) / NUTRITION_FIELDS.length;
+  }
+
+  // Costruisce le settimane dalla prima registrazione fino ad oggi.
+  // I giorni futuri non vengono contati; i giorni passati senza registrazione valgono 2.
+  function buildNutritionWeeks(entries) {
+    if (!entries.length) return [];
+
+    const today = localDateString();
+    const firstDate = entries[0].entry_date;
+    const byDate = {};
+
+    entries.forEach(item => {
+      byDate[item.entry_date] = item;
+    });
+
+    const currentWeekStart = getWeekRange().start;
+    const firstInfo = getISOWeekInfo(firstDate);
+    let monday = getISOWeekRange(firstInfo.year, firstInfo.week).start;
+
+    const weeks = [];
+
+    while (monday <= currentWeekStart) {
+      const info = getISOWeekInfo(monday);
+      const days = [];
+
+      for (let index = 0; index < 7; index++) {
+        const date = addDaysToDate(monday, index);
+
+        if (date < firstDate || date > today) continue;
+
+        const entry = byDate[date] || null;
+
+        days.push({
+          date,
+          entry,
+          score: nutritionDayScore(entry)
+        });
+      }
+
+      if (days.length) {
+        const average = days.reduce((sum, day) => sum + day.score, 0) / days.length;
+
+        const unhealthy = days.reduce((sum, day) => {
+          if (!day.entry) return sum;
+
+          return sum + NUTRITION_FIELDS.filter(
+            field => Number(day.entry[field.key]) === 1
+          ).length;
+        }, 0);
+
+        weeks.push({
+          weekStart: monday,
+          week: info.week,
+          year: info.year,
+          days,
+          average,
+          unhealthy,
+          recorded: days.filter(day => day.entry).length,
+          lowAverage: average < NUTRITION_MIN_AVERAGE,
+          tooManyUnhealthy: unhealthy > NUTRITION_MAX_UNHEALTHY,
+          isRed: average < NUTRITION_MIN_AVERAGE || unhealthy > NUTRITION_MAX_UNHEALTHY
+        });
+      }
+
+      monday = addDaysToDate(monday, 7);
+    }
+
+    return weeks;
+  }
+
+  function renderNutritionChart(weeks) {
+    if (!weeks.length) {
+      return `<p class="ft-message">Registra la prima giornata per vedere il trend.</p>`;
+    }
+
+    const width = 680;
+    const height = 240;
+    const left = 34;
+    const right = 16;
+    const top = 18;
+    const bottom = 42;
+    const plotWidth = width - left - right;
+    const plotHeight = height - top - bottom;
+
+    const yFor = value => top + plotHeight - ((value - 1) / 2) * plotHeight;
+    const stepX = weeks.length > 1 ? plotWidth / (weeks.length - 1) : 0;
+
+    const coordinates = weeks.map((item, index) => ({
+      x: weeks.length > 1 ? left + index * stepX : left + plotWidth / 2,
+      y: yFor(item.average),
+      average: item.average,
+      isRed: item.isRed,
+      label: `CW${item.week}`
+    }));
+
+    const polyline = coordinates
+      .map(point => `${point.x},${point.y}`)
+      .join(" ");
+
+    const labelEvery = Math.max(1, Math.ceil(weeks.length / 7));
+
+    const grid = [1, 1.5, 2, 2.5, 3].map(value => {
+      const y = yFor(value);
+      const isMain = Number.isInteger(value);
+
+      return `
+        <line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}"
+          stroke="var(--border-color,#e1e5eb)"
+          stroke-dasharray="${value === 2 ? "6 5" : "3 4"}"
+          stroke-width="${value === 2 ? 1.6 : 1}"/>
+        ${isMain ? `
+          <text x="${left - 9}" y="${y + 4}" text-anchor="end"
+            font-size="10" fill="var(--text-muted,#718096)">${value}</text>
+        ` : ""}
+      `;
+    }).join("");
+
+    const dots = coordinates.map(point => `
+      <circle cx="${point.x}" cy="${point.y}" r="5"
+        fill="${point.isRed ? "#c34d5b" : "#168b68"}"
+        stroke="var(--card-bg,#fff)" stroke-width="1.5">
+        <title>${escapeHtml(point.label)}: ${fmtScore(point.average)}</title>
+      </circle>
+    `).join("");
+
+    const labels = coordinates.map((point, index) => {
+      if (
+        index % labelEvery !== 0 &&
+        index !== coordinates.length - 1
+      ) return "";
+
+      return `
+        <text x="${point.x}" y="${height - 13}" text-anchor="middle"
+          font-size="10" fill="var(--text-muted,#718096)">
+          ${escapeHtml(point.label)}
+        </text>
+      `;
+    }).join("");
+
+    return `
+      <div class="ft-stats-chart">
+        <svg viewBox="0 0 ${width} ${height}" role="img"
+          aria-label="Andamento settimanale della nutrizione">
+          ${grid}
+          <polyline points="${polyline}" fill="none" stroke="#8b929b"
+            stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          ${dots}
+          ${labels}
+        </svg>
+      </div>
+
+      <div class="ft-stats-note" style="display:flex;gap:16px;flex-wrap:wrap;">
+        <span><strong style="color:#168b68;">●</strong> Settimana verde</span>
+        <span><strong style="color:#c34d5b;">●</strong> Settimana rossa</span>
+        <span>Linea tratteggiata = media 2 (normale)</span>
+      </div>
+    `;
+  }
+
+  async function submitNutrition(event) {
+    event.preventDefault();
+
+    const form = event.target;
+    const button = form.querySelector('button[type="submit"]');
+    const errorBox = document.getElementById("ftNutritionError");
+    const formData = new FormData(form);
+
+    errorBox.textContent = "";
+
+    const entryDate = String(formData.get("entry_date") || "");
+    const today = localDateString();
+    const minDate = addDaysToDate(today, -6);
+
+    if (!entryDate || entryDate > today || entryDate < minDate) {
+      errorBox.textContent = "Scegli un giorno tra gli ultimi 7 giorni.";
+      return;
+    }
+
+    const payload = {
+      challenge_id: currentMember.challenge_id,
+      member_id: currentMember.id,
+      entry_date: entryDate
+    };
+
+    for (const field of NUTRITION_FIELDS) {
+      const value = Number(formData.get(field.key));
+
+      if (![1, 2, 3].includes(value)) {
+        errorBox.textContent = `Seleziona un voto per ${field.label.toLowerCase()}.`;
+        return;
+      }
+
+      payload[field.key] = value;
+    }
+
+    button.disabled = true;
+    button.textContent = "Salvataggio...";
+
+    try {
+      const { error } = await client
+        .from("nutrition_entries")
+        .upsert(payload, { onConflict: "member_id,entry_date" });
+
+      if (error) throw error;
+
+      alert("Giornata salvata!");
+      nutritionDate = entryDate;
+      currentView = "nutrition";
+      await loadDashboard(currentUser);
+
+    } catch (error) {
+      console.error("FIT TOGETHER nutrition error:", error);
+
+      errorBox.textContent = error.message || "Errore durante il salvataggio.";
+      button.disabled = false;
+      button.textContent = "Salva giornata";
+    }
+  }
+
+  // --------------------------------------------------
   // DASHBOARD
   // --------------------------------------------------
 
@@ -2282,6 +2663,252 @@
       } else {
         await renderWorkoutDetails(workout);
         return;
+      }
+
+    // --------------------------------------------------
+    // NUTRITION
+    // --------------------------------------------------
+
+    } else if (currentView === "nutrition") {
+
+      let nutritionEntries = [];
+      let nutritionReady = false;
+
+      try {
+        const { data, error } = await client
+          .from("nutrition_entries")
+          .select("id, entry_date, breakfast, lunch, dinner, snacks")
+          .eq("member_id", ownMember.id)
+          .order("entry_date", { ascending: true });
+
+        if (error) {
+          console.warn("FIT TOGETHER: nutrizione non disponibile:", error.message);
+        } else {
+          nutritionEntries = data || [];
+          nutritionReady = true;
+        }
+      } catch (error) {
+        console.warn("FIT TOGETHER: errore lettura nutrizione:", error);
+      }
+
+      if (!nutritionReady) {
+        pageContent = `
+          <div class="ft-panel">
+            <h2 class="ft-page-title">🥗 Nutrizione</h2>
+            <p class="ft-message">
+              Questa sezione non è ancora attiva: il database deve essere configurato.
+            </p>
+          </div>
+        `;
+      } else {
+        const todayStr = localDateString();
+        const minDate = addDaysToDate(todayStr, -6);
+
+        if (nutritionDate > todayStr || nutritionDate < minDate) {
+          nutritionDate = todayStr;
+        }
+
+        const existing = nutritionEntries.find(
+          item => item.entry_date === nutritionDate
+        ) || null;
+
+        const optionLabels = {
+          1: ["😕", "Unhealthy"],
+          2: ["😐", "Normale"],
+          3: ["😊", "Healthy"]
+        };
+
+        const fieldsHtml = NUTRITION_FIELDS.map(field => {
+          const selected = existing ? Number(existing[field.key]) : 2;
+
+          return `
+            <div class="ft-nutri-row">
+              <div class="ft-nutri-label">${field.icon} ${field.label}</div>
+
+              <div class="ft-nutri-options">
+                ${[1, 2, 3].map(value => `
+                  <label class="ft-nutri-option v${value}">
+                    <input
+                      type="radio"
+                      name="${field.key}"
+                      value="${value}"
+                      ${selected === value ? "checked" : ""}
+                    >
+                    <span>
+                      <b>${optionLabels[value][0]}</b>
+                      ${optionLabels[value][1]}
+                    </span>
+                  </label>
+                `).join("")}
+              </div>
+            </div>
+          `;
+        }).join("");
+
+        const nutritionWeeks = buildNutritionWeeks(nutritionEntries);
+        const currentNutritionWeek = nutritionWeeks.find(
+          item => item.weekStart === week.start
+        ) || null;
+
+        const dayNames = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
+
+        let currentWeekHtml = `
+          <p class="ft-message">
+            Registra la prima giornata per vedere la media della settimana.
+          </p>
+        `;
+
+        if (currentNutritionWeek) {
+          const cw = currentNutritionWeek;
+          const colorClass = cw.isRed ? "red" : "green";
+          const color = cw.isRed ? "#c34d5b" : "#168b68";
+
+          const reasons = [];
+
+          if (cw.lowAverage) {
+            reasons.push(`la media (${fmtScore(cw.average)}) è sotto ${NUTRITION_MIN_AVERAGE}`);
+          }
+
+          if (cw.tooManyUnhealthy) {
+            reasons.push(`hai ${cw.unhealthy} pasti unhealthy (limite ${NUTRITION_MAX_UNHEALTHY} a settimana)`);
+          }
+
+          const bannerText = cw.isRed
+            ? `🔴 Settimana in rosso: ${reasons.join(" e ")}.`
+            : `🟢 Settimana in linea: media di almeno ${NUTRITION_MIN_AVERAGE} e al massimo ${NUTRITION_MAX_UNHEALTHY} pasti unhealthy.`;
+
+          const dayChips = dayNames.map((name, index) => {
+            const date = addDaysToDate(week.start, index);
+            const day = cw.days.find(item => item.date === date);
+
+            if (!day) {
+              return `
+                <div class="ft-nutri-day">${name}<strong>·</strong></div>
+              `;
+            }
+
+            if (!day.entry) {
+              return `
+                <div class="ft-nutri-day" title="Non registrato: vale 2">
+                  ${name}<strong>—</strong>
+                </div>
+              `;
+            }
+
+            return `
+              <div class="ft-nutri-day ${day.score < NUTRITION_MIN_AVERAGE ? "red" : "green"}">
+                ${name}<strong>${fmtScore(day.score)}</strong>
+              </div>
+            `;
+          }).join("");
+
+          currentWeekHtml = `
+            <div class="ft-stats-kpis">
+              <div class="ft-stats-kpi">
+                <div class="ft-stats-kpi-label">Media della settimana</div>
+                <div class="ft-stats-kpi-value" style="color:${color};">
+                  ${fmtScore(cw.average)}
+                </div>
+              </div>
+
+              <div class="ft-stats-kpi">
+                <div class="ft-stats-kpi-label">Pasti unhealthy (max ${NUTRITION_MAX_UNHEALTHY})</div>
+                <div class="ft-stats-kpi-value" style="color:${cw.tooManyUnhealthy ? "#c34d5b" : "inherit"};">
+                  ${cw.unhealthy}
+                </div>
+              </div>
+            </div>
+
+            <div class="ft-nutri-banner ${colorClass}">${escapeHtml(bannerText)}</div>
+
+            <div class="ft-nutri-days">${dayChips}</div>
+
+            <p class="ft-stats-note">
+              Giorni registrati: ${cw.recorded} su ${cw.days.length}.
+              I giorni senza registrazione valgono 2 (normale) e i giorni futuri non vengono contati.
+            </p>
+          `;
+        }
+
+        const recentWeeksHtml = nutritionWeeks.length
+          ? [...nutritionWeeks].reverse().slice(0, 8).map(item => `
+              <div class="ft-detail-row">
+                <span class="ft-detail-label">
+                  CW${item.week}${item.weekStart === week.start ? " · in corso" : ""}
+                  · ${item.unhealthy} unhealthy
+                </span>
+
+                <strong class="ft-detail-value" style="color:${item.isRed ? "#c34d5b" : "#168b68"};">
+                  ${fmtScore(item.average)}
+                </strong>
+              </div>
+            `).join("")
+          : "";
+
+        pageContent = `
+          <div class="ft-panel">
+            <h2 class="ft-page-title">🥗 Nutrizione</h2>
+            <p class="ft-subtitle">
+              Valuta come hai mangiato: 1 = unhealthy, 2 = normale, 3 = healthy.
+            </p>
+
+            <h3 style="margin:25px 0 5px;">Registra la giornata</h3>
+
+            <form id="ftNutritionForm" class="ft-form">
+              <label>
+                Giorno
+                <input
+                  type="date"
+                  name="entry_date"
+                  data-nutrition-date
+                  min="${minDate}"
+                  max="${todayStr}"
+                  value="${nutritionDate}"
+                  required
+                >
+              </label>
+
+              ${existing ? `
+                <p class="ft-message" style="margin:0;">
+                  Hai già registrato questo giorno: puoi modificarlo.
+                </p>
+              ` : ""}
+
+              ${fieldsHtml}
+
+              <p id="ftNutritionError" class="ft-error"></p>
+
+              <button class="ft-button ft-primary" type="submit">
+                ${existing ? "Aggiorna giornata" : "Salva giornata"}
+              </button>
+            </form>
+
+            <h3 style="margin:30px 0 5px;">Questa settimana</h3>
+            <p class="ft-subtitle">
+              CW${getISOWeekInfo(week.start).week} · ${formatDate(week.start)} – ${formatDate(week.end)}
+            </p>
+
+            ${currentWeekHtml}
+
+            <h3 style="margin:30px 0 5px;">Trend settimanale</h3>
+            <p class="ft-subtitle">
+              La media di ogni settimana: un'idea di come mangi di norma.
+            </p>
+            ${renderNutritionChart(nutritionWeeks)}
+
+            ${recentWeeksHtml ? `
+              <h3 style="margin:30px 0 5px;">Ultime settimane</h3>
+              ${recentWeeksHtml}
+            ` : ""}
+
+            <p class="ft-stats-note">
+              Una settimana è <strong>verde</strong> se la media è almeno ${NUTRITION_MIN_AVERAGE}
+              e i pasti con voto 1 sono al massimo ${NUTRITION_MAX_UNHEALTHY}.
+              È <strong>rossa</strong> se la media è sotto ${NUTRITION_MIN_AVERAGE}
+              oppure se i pasti unhealthy superano ${NUTRITION_MAX_UNHEALTHY}.
+            </p>
+          </div>
+        `;
       }
 
     // --------------------------------------------------
@@ -3246,6 +3873,13 @@
                   ⚖️ Obiettivo fitness
                 </button>
 
+                <button
+                  class="ft-menu-item ${currentView === "nutrition" ? "active" : ""}"
+                  data-action="nav-nutrition"
+                >
+                  🥗 Nutrizione
+                </button>
+
                 <div class="ft-menu-divider"></div>
 
                 <button class="ft-menu-item" data-action="logout">
@@ -3417,7 +4051,8 @@
       notificationRefreshTimer = setInterval(() => {
         const workoutFormOpen =
           document.getElementById("ftWorkoutForm") ||
-          document.getElementById("ftWeightForm");
+          document.getElementById("ftWeightForm") ||
+          document.getElementById("ftNutritionForm");
 
         if (currentUser && !loading && !workoutFormOpen) {
           loadDashboard(currentUser);
@@ -3514,6 +4149,14 @@
       markWeightReminderRead(getWeekRange().start);
       currentView = "fitness-goal";
       selectedWorkoutId = null;
+      await loadDashboard(currentUser);
+      return;
+    }
+
+    if (action === "nav-nutrition") {
+      currentView = "nutrition";
+      selectedWorkoutId = null;
+      nutritionDate = localDateString();
       await loadDashboard(currentUser);
       return;
     }
@@ -3691,6 +4334,20 @@
       return;
     }
 
+    const nutritionDateInput = event.target.closest("[data-nutrition-date]");
+
+    if (nutritionDateInput) {
+      const today = localDateString();
+      const value = nutritionDateInput.value;
+
+      if (value && value <= today && value >= addDaysToDate(today, -6)) {
+        nutritionDate = value;
+        await loadDashboard(currentUser);
+      }
+
+      return;
+    }
+
     const filter = event.target.closest("[data-history-filter]");
     if (!filter) return;
 
@@ -3732,6 +4389,8 @@
   challengeCard.addEventListener("submit", event => {
     if (event.target && event.target.id === "ftWeightForm") {
       submitWeight(event);
+    } else if (event.target && event.target.id === "ftNutritionForm") {
+      submitNutrition(event);
     }
   });
 
