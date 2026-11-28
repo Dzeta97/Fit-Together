@@ -1,4 +1,3 @@
-
 (() => {
   "use strict";
 
@@ -32,6 +31,12 @@
   let historyYear = null;
   let historyMonth = null;
   let historyWeek = null;
+
+  // Filtri della sezione Statistiche sport
+  let statsPeriod = "year";
+  let statsYear = new Date().getFullYear();
+  let statsMonth = new Date().getMonth() + 1;
+  let statsWeek = getISOWeekInfo(localDateString()).week;
 
   // --------------------------------------------------
   // UTILITIES
@@ -835,6 +840,107 @@
         color:rgba(255,255,255,.85);
       }
 
+      /* STATISTICHE SPORT */
+
+      .ft-stats-kpis {
+        display:grid;
+        grid-template-columns:repeat(2,minmax(0,1fr));
+        gap:10px;
+        margin-top:16px;
+      }
+
+      .ft-stats-kpi {
+        min-width:0;
+        padding:14px;
+        border:1px solid var(--border-color,#e1e5eb);
+        border-radius:13px;
+      }
+
+      .ft-stats-kpi-label {
+        color:var(--text-muted,#718096);
+        font-size:11px;
+        line-height:1.35;
+      }
+
+      .ft-stats-kpi-value {
+        margin-top:7px;
+        font-size:25px;
+        font-weight:800;
+        line-height:1.1;
+      }
+
+      .ft-stats-chart {
+        width:100%;
+        overflow:hidden;
+        margin-top:12px;
+      }
+
+      .ft-stats-chart svg {
+        display:block;
+        width:100%;
+        height:auto;
+      }
+
+      .ft-pie-layout {
+        display:flex;
+        align-items:center;
+        gap:20px;
+        flex-wrap:wrap;
+        margin-top:16px;
+      }
+
+      .ft-pie-chart {
+        width:150px;
+        height:150px;
+        flex:0 0 150px;
+        border-radius:50%;
+      }
+
+      .ft-pie-legend {
+        display:grid;
+        gap:9px;
+        flex:1;
+        min-width:135px;
+      }
+
+      .ft-pie-legend-item {
+        display:flex;
+        align-items:center;
+        gap:8px;
+        font-size:12px;
+      }
+
+      .ft-pie-dot {
+        width:10px;
+        height:10px;
+        border-radius:50%;
+        flex:0 0 10px;
+      }
+
+      .ft-pie-label {
+        flex:1;
+        min-width:0;
+      }
+
+      .ft-stats-note {
+        color:var(--text-muted,#718096);
+        font-size:11px;
+        line-height:1.45;
+        margin-top:12px;
+      }
+
+      @media(max-width:420px) {
+        .ft-pie-layout {
+          gap:14px;
+        }
+
+        .ft-pie-chart {
+          width:125px;
+          height:125px;
+          flex-basis:125px;
+        }
+      }
+
       .ft-rule-card {
         padding:17px;
         border:1px solid var(--border-color,#e1e5eb);
@@ -1438,6 +1544,285 @@
   }
 
   // --------------------------------------------------
+  // SPORT STATISTICS
+  // --------------------------------------------------
+
+  function addDaysToDate(value, days) {
+    const date = new Date(`${value}T12:00:00`);
+    date.setDate(date.getDate() + days);
+    return localDateString(date);
+  }
+
+  function getStatsRange() {
+    const year = Number(statsYear) || new Date().getFullYear();
+
+    if (statsPeriod === "month") {
+      const month = Math.min(12, Math.max(1, Number(statsMonth) || 1));
+      const startDate = new Date(year, month - 1, 1, 12);
+      const endDate = new Date(year, month, 0, 12);
+
+      return {
+        start: localDateString(startDate),
+        end: localDateString(endDate)
+      };
+    }
+
+    if (statsPeriod === "week") {
+      const maxWeek = getISOWeekInfo(`${year}-12-28`).week;
+      const week = Math.min(maxWeek, Math.max(1, Number(statsWeek) || 1));
+      return getISOWeekRange(year, week);
+    }
+
+    return {
+      start: `${year}-01-01`,
+      end: `${year}-12-31`
+    };
+  }
+
+  function renderStatsLineChart(points) {
+    if (!points.length) {
+      return `<p class="ft-message">Nessuna attività approvata nel periodo selezionato.</p>`;
+    }
+
+    const width = 680;
+    const height = 230;
+    const left = 38;
+    const right = 16;
+    const top = 18;
+    const bottom = 42;
+    const plotWidth = width - left - right;
+    const plotHeight = height - top - bottom;
+    const maxValue = Math.max(1, ...points.map(point => point.value));
+    const stepX = points.length > 1 ? plotWidth / (points.length - 1) : 0;
+
+    const coordinates = points.map((point, index) => {
+      const x = points.length > 1 ? left + index * stepX : left + plotWidth / 2;
+      const y = top + plotHeight - (point.value / maxValue) * plotHeight;
+      return { x, y, ...point };
+    });
+
+    const polyline = coordinates
+      .map(point => `${point.x},${point.y}`)
+      .join(" ");
+
+    const labelEvery = Math.max(1, Math.ceil(points.length / 7));
+
+    const grid = Array.from({ length: 4 }, (_, index) => {
+      const value = Math.round(maxValue * (3 - index) / 3);
+      const y = top + (plotHeight / 3) * index;
+
+      return `
+        <line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}"
+          stroke="var(--border-color,#e1e5eb)" stroke-dasharray="3 4"/>
+        <text x="${left - 9}" y="${y + 4}" text-anchor="end"
+          font-size="10" fill="var(--text-muted,#718096)">${value}</text>
+      `;
+    }).join("");
+
+    const dots = coordinates.map(point => `
+      <circle cx="${point.x}" cy="${point.y}" r="3.5"
+        fill="#168b68" stroke="var(--card-bg,#fff)" stroke-width="1.5">
+        <title>${escapeHtml(point.label)}: ${point.value} attività</title>
+      </circle>
+    `).join("");
+
+    const labels = coordinates.map((point, index) => {
+      if (
+        index % labelEvery !== 0 &&
+        index !== coordinates.length - 1
+      ) return "";
+
+      return `
+        <text x="${point.x}" y="${height - 13}" text-anchor="middle"
+          font-size="10" fill="var(--text-muted,#718096)">
+          ${escapeHtml(point.label)}
+        </text>
+      `;
+    }).join("");
+
+    return `
+      <div class="ft-stats-chart">
+        <svg viewBox="0 0 ${width} ${height}" role="img"
+          aria-label="Andamento delle attività approvate">
+          ${grid}
+          <polyline points="${polyline}" fill="none" stroke="#168b68"
+            stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          ${dots}
+          ${labels}
+        </svg>
+      </div>
+    `;
+  }
+
+  function renderStatsPieChart(workouts) {
+    const palette = [
+      "#168b68", "#3979c6", "#e6a23c", "#8b65bd",
+      "#d45d79", "#4b9da8", "#8b929b"
+    ];
+
+    const grouped = {};
+
+    workouts
+      .filter(workout => workout.status === "approved")
+      .forEach(workout => {
+        const type = workout.activity_type || "other";
+        grouped[type] = (grouped[type] || 0) + 1;
+      });
+
+    const entries = Object.entries(grouped)
+      .sort((a, b) => b[1] - a[1]);
+
+    const total = entries.reduce((sum, item) => sum + item[1], 0);
+
+    if (!total) {
+      return `<p class="ft-message">Non ci sono ancora attività approvate da rappresentare.</p>`;
+    }
+
+    let cumulative = 0;
+    const stops = entries.map(([type, count], index) => {
+      const start = cumulative / total * 100;
+      cumulative += count;
+      const end = cumulative / total * 100;
+      return `${palette[index % palette.length]} ${start}% ${end}%`;
+    });
+
+    const legend = entries.map(([type, count], index) => `
+      <div class="ft-pie-legend-item">
+        <span class="ft-pie-dot" style="background:${palette[index % palette.length]}"></span>
+        <span class="ft-pie-label">${escapeHtml(activityLabel(type))}</span>
+        <strong>${Math.round(count / total * 100)}%</strong>
+      </div>
+    `).join("");
+
+    return `
+      <div class="ft-pie-layout">
+        <div class="ft-pie-chart"
+          style="background:conic-gradient(${stops.join(",")});"
+          role="img" aria-label="Distribuzione delle attività approvate">
+        </div>
+        <div class="ft-pie-legend">${legend}</div>
+      </div>
+    `;
+  }
+
+  function buildStatsTrend(workouts, range) {
+    const approved = workouts.filter(workout =>
+      workout.status === "approved" &&
+      workout.activity_date >= range.start &&
+      workout.activity_date <= range.end
+    );
+
+    const points = [];
+
+    if (statsPeriod === "year") {
+      const monthLabels = [
+        "Gen", "Feb", "Mar", "Apr", "Mag", "Giu",
+        "Lug", "Ago", "Set", "Ott", "Nov", "Dic"
+      ];
+
+      for (let month = 1; month <= 12; month++) {
+        const value = approved.filter(workout =>
+          Number(workout.activity_date.slice(5, 7)) === month
+        ).length;
+
+        points.push({ label: monthLabels[month - 1], value });
+      }
+
+    } else {
+      const start = new Date(`${range.start}T12:00:00`);
+      const end = new Date(`${range.end}T12:00:00`);
+      const dayLabels = ["Dom", "Lun", "Mar", "Mer", "Gio", "Ven", "Sab"];
+
+      for (
+        let date = new Date(start);
+        date <= end;
+        date.setDate(date.getDate() + 1)
+      ) {
+        const dateString = localDateString(date);
+        const value = approved.filter(workout =>
+          workout.activity_date === dateString
+        ).length;
+
+        const label = statsPeriod === "week"
+          ? dayLabels[date.getDay()]
+          : String(date.getDate());
+
+        points.push({ label, value });
+      }
+    }
+
+    return { approved, points };
+  }
+
+  function calculateMissedSessions(allWorkouts, ownMember, range) {
+    const joinedAt = ownMember.joined_at
+      ? localDateString(new Date(ownMember.joined_at))
+      : (allWorkouts.length
+          ? allWorkouts
+              .map(item => item.activity_date)
+              .sort()[0]
+          : range.start);
+
+    const joinedInfo = getISOWeekInfo(joinedAt);
+    const joinedWeek = getISOWeekRange(joinedInfo.year, joinedInfo.week);
+    let monday = addDaysToDate(joinedWeek.end, 1);
+
+    const currentWeekStart = getWeekRange().start;
+    const lastCompletedSunday = addDaysToDate(currentWeekStart, -1);
+
+    const result = {
+      completed: 0,
+      missed: 0,
+      pending: 0,
+      weeks: 0
+    };
+
+    while (monday <= lastCompletedSunday) {
+      const info = getISOWeekInfo(monday);
+      const weekRange = getISOWeekRange(info.year, info.week);
+      const sunday = weekRange.end;
+
+      let includeWeek = sunday >= range.start && sunday <= range.end;
+
+      if (statsPeriod === "week") {
+        includeWeek = includeWeek &&
+          info.year === Number(statsYear) &&
+          info.week === Number(statsWeek);
+      }
+
+      if (statsPeriod === "month") {
+        includeWeek = includeWeek &&
+          Number(sunday.slice(5, 7)) === Number(statsMonth) &&
+          Number(sunday.slice(0, 4)) === Number(statsYear);
+      }
+
+      if (includeWeek) {
+        result.weeks++;
+
+        getPlanSlots(ownMember.weekly_plan).forEach(slot => {
+          const slotEntries = allWorkouts.filter(workout =>
+            workout.session_slot === slot.id &&
+            workout.activity_date >= weekRange.start &&
+            workout.activity_date <= weekRange.end
+          );
+
+          if (slotEntries.some(item => item.status === "approved")) {
+            result.completed++;
+          } else if (slotEntries.some(item => item.status === "pending")) {
+            result.pending++;
+          } else {
+            result.missed++;
+          }
+        });
+      }
+
+      monday = addDaysToDate(monday, 7);
+    }
+
+    return result;
+  }
+
+  // --------------------------------------------------
   // DASHBOARD
   // --------------------------------------------------
 
@@ -1449,7 +1834,8 @@
     notifications,
     ownMember,
     week,
-    historyWorkouts
+    historyWorkouts,
+    statsWorkouts
   ) {
     const workoutCounts = {};
 
@@ -1616,6 +2002,202 @@
           </div>
 
           ${pendingHtml}
+        </div>
+      `;
+
+    // --------------------------------------------------
+    // SPORTS STATISTICS
+    // --------------------------------------------------
+
+    } else if (currentView === "sports-stats") {
+      const allStatsWorkouts = statsWorkouts;
+      const range = getStatsRange();
+      const filteredStatsWorkouts = allStatsWorkouts.filter(workout =>
+        workout.activity_date >= range.start &&
+        workout.activity_date <= range.end
+      );
+
+      const trend = buildStatsTrend(allStatsWorkouts, range);
+      const approved = trend.approved;
+
+      const minutes = approved.reduce(
+        (sum, workout) => sum + Number(workout.duration_minutes || 0),
+        0
+      );
+
+      const distance = approved.reduce(
+        (sum, workout) => sum + Number(workout.distance_km || 0),
+        0
+      );
+
+      const attendance = calculateMissedSessions(
+        allStatsWorkouts,
+        ownMember,
+        range
+      );
+
+      const decidedSessions = attendance.completed + attendance.missed;
+
+      const consistency = decidedSessions
+        ? Math.round(attendance.completed / decidedSessions * 100)
+        : null;
+
+      const missedPercentage = decidedSessions
+        ? Math.round(attendance.missed / decidedSessions * 100)
+        : null;
+
+      const years = [
+        ...new Set([
+          new Date().getFullYear(),
+          ...allStatsWorkouts.map(item =>
+            Number(item.activity_date.slice(0, 4))
+          )
+        ])
+      ].sort((a, b) => b - a);
+
+      const monthNames = [
+        "Gennaio", "Febbraio", "Marzo", "Aprile",
+        "Maggio", "Giugno", "Luglio", "Agosto",
+        "Settembre", "Ottobre", "Novembre", "Dicembre"
+      ];
+
+      const maxWeek = getISOWeekInfo(`${Number(statsYear)}-12-28`).week;
+      const safeWeek = Math.min(maxWeek, Math.max(1, Number(statsWeek) || 1));
+
+      const periodLabel = statsPeriod === "year"
+        ? String(statsYear)
+        : statsPeriod === "month"
+          ? `${monthNames[Number(statsMonth) - 1]} ${statsYear}`
+          : `CW${safeWeek} · ${statsYear}`;
+
+      pageContent = `
+        <div class="ft-panel">
+          <h2 class="ft-page-title">Statistiche sport</h2>
+          <p class="ft-subtitle">
+            Analisi dei tuoi allenamenti personali approvati.
+          </p>
+
+          <div class="ft-history-controls" style="grid-template-columns:repeat(3,minmax(0,1fr));">
+            <label>
+              Periodo
+              <select data-stats-filter="period">
+                <option value="year" ${statsPeriod === "year" ? "selected" : ""}>Anno</option>
+                <option value="month" ${statsPeriod === "month" ? "selected" : ""}>Mese</option>
+                <option value="week" ${statsPeriod === "week" ? "selected" : ""}>Settimana</option>
+              </select>
+            </label>
+
+            <label>
+              Anno
+              <select data-stats-filter="year">
+                ${years.map(year => `
+                  <option value="${year}" ${Number(statsYear) === year ? "selected" : ""}>
+                    ${year}
+                  </option>
+                `).join("")}
+              </select>
+            </label>
+
+            ${statsPeriod === "month" ? `
+              <label>
+                Mese
+                <select data-stats-filter="month">
+                  ${monthNames.map((name, index) => `
+                    <option value="${index + 1}" ${Number(statsMonth) === index + 1 ? "selected" : ""}>
+                      ${name}
+                    </option>
+                  `).join("")}
+                </select>
+              </label>
+            ` : statsPeriod === "week" ? `
+              <label>
+                Settimana
+                <select data-stats-filter="week">
+                  ${Array.from({ length: maxWeek }, (_, index) => index + 1).map(number => `
+                    <option value="${number}" ${safeWeek === number ? "selected" : ""}>
+                      CW${number}
+                    </option>
+                  `).join("")}
+                </select>
+              </label>
+            ` : `
+              <div></div>
+            `}
+          </div>
+
+          <p class="ft-subtitle" style="margin-top:0;">
+            Periodo selezionato: <strong>${escapeHtml(periodLabel)}</strong>
+          </p>
+
+          <div class="ft-stats-kpis">
+            <div class="ft-stats-kpi">
+              <div class="ft-stats-kpi-label">Attività approvate</div>
+              <div class="ft-stats-kpi-value">${approved.length}</div>
+            </div>
+
+            <div class="ft-stats-kpi">
+              <div class="ft-stats-kpi-label">Ore di allenamento</div>
+              <div class="ft-stats-kpi-value">${(minutes / 60).toFixed(1).replace(".", ",")} h</div>
+            </div>
+
+            <div class="ft-stats-kpi">
+              <div class="ft-stats-kpi-label">Costanza sulle sessioni definite</div>
+              <div class="ft-stats-kpi-value" style="color:#168b68;">
+                ${consistency === null ? "—" : `${consistency}%`}
+              </div>
+            </div>
+
+            <div class="ft-stats-kpi">
+              <div class="ft-stats-kpi-label">Sessioni saltate</div>
+              <div class="ft-stats-kpi-value" style="color:#c34d5b;">
+                ${missedPercentage === null ? "—" : `${missedPercentage}%`}
+              </div>
+            </div>
+          </div>
+
+          <div class="ft-stats-kpi" style="margin-top:10px;">
+            <div class="ft-stats-kpi-label">Distanza totale registrata</div>
+            <div class="ft-stats-kpi-value">${distance.toFixed(1).replace(".", ",")} km</div>
+          </div>
+
+          <h3 style="margin:25px 0 5px;">Trend attività</h3>
+          <p class="ft-subtitle">
+            Numero di allenamenti approvati nel tempo.
+          </p>
+          ${renderStatsLineChart(trend.points)}
+
+          <h3 style="margin:25px 0 5px;">Le tue attività</h3>
+          <p class="ft-subtitle">
+            Distribuzione degli sport praticati nel periodo selezionato.
+          </p>
+          ${renderStatsPieChart(filteredStatsWorkouts)}
+
+          <h3 style="margin:25px 0 5px;">Costanza e sessioni saltate</h3>
+          <div class="ft-detail-row">
+            <span class="ft-detail-label">Sessioni completate</span>
+            <strong class="ft-detail-value">${attendance.completed}</strong>
+          </div>
+          <div class="ft-detail-row">
+            <span class="ft-detail-label">Sessioni saltate</span>
+            <strong class="ft-detail-value">${attendance.missed}</strong>
+          </div>
+          <div class="ft-detail-row">
+            <span class="ft-detail-label">In attesa di approvazione</span>
+            <strong class="ft-detail-value">${attendance.pending}</strong>
+          </div>
+          <div class="ft-detail-row">
+            <span class="ft-detail-label">Settimane complete analizzate</span>
+            <strong class="ft-detail-value">${attendance.weeks}</strong>
+          </div>
+
+          <p class="ft-stats-note">
+            Le statistiche utilizzano soltanto gli allenamenti approvati.
+            Le sessioni previste vengono conteggiate dalla prima settimana
+            completa successiva alla tua iscrizione. Le settimane ancora in
+            corso non vengono considerate nel calcolo delle sessioni saltate.
+            Le sessioni in attesa di approvazione restano separate e non vengono
+            considerate né completate né saltate.
+          </p>
         </div>
       `;
 
@@ -2168,6 +2750,13 @@
                   ◷ Storico attività
                 </button>
 
+                <button
+                  class="ft-menu-item ${currentView === "sports-stats" ? "active" : ""}"
+                  data-action="nav-sports-stats"
+                >
+                  📊 Statistiche sport
+                </button>
+
                 <div class="ft-menu-divider"></div>
 
                 <button class="ft-menu-item" data-action="logout">
@@ -2256,7 +2845,8 @@
         workoutsResult,
         pendingResult,
         notificationsResult,
-        historyResult
+        historyResult,
+        statsResult
       ] = await Promise.all([
 
         client
@@ -2295,7 +2885,14 @@
           .eq("challenge_id", ownMember.challenge_id)
           .eq("member_id", ownMember.id)
           .eq("status", "approved")
-          .order("activity_date", { ascending: false })
+          .order("activity_date", { ascending: false }),
+
+        client
+          .from("workout_entries")
+          .select("id, member_id, session_slot, activity_type, activity_date, duration_minutes, distance_km, status, created_at")
+          .eq("challenge_id", ownMember.challenge_id)
+          .eq("member_id", ownMember.id)
+          .order("activity_date", { ascending: true })
 
       ]);
 
@@ -2304,6 +2901,7 @@
       if (pendingResult.error) throw pendingResult.error;
       if (notificationsResult.error) throw notificationsResult.error;
       if (historyResult.error) throw historyResult.error;
+      if (statsResult.error) throw statsResult.error;
 
       await renderDashboard(
         challenge,
@@ -2313,7 +2911,8 @@
         notificationsResult.data || [],
         ownMember,
         week,
-        historyResult.data || []
+        historyResult.data || [],
+        statsResult.data || []
       );
 
       console.log("FIT TOGETHER: dashboard caricata.");
@@ -2400,6 +2999,19 @@
       return;
     }
 
+    if (action === "nav-sports-stats") {
+      currentView = "sports-stats";
+      selectedWorkoutId = null;
+
+      statsPeriod = "year";
+      statsYear = new Date().getFullYear();
+      statsMonth = new Date().getMonth() + 1;
+      statsWeek = getISOWeekInfo(localDateString()).week;
+
+      await loadDashboard(currentUser);
+      return;
+    }
+
     if (action === "nav-rules") {
       currentView = "rules";
       selectedWorkoutId = null;
@@ -2418,12 +3030,12 @@
         }
 
         historyMonth = null;
-        
+
         const currentInfo = getISOWeekInfo(localDateString());
 
-historyWeek = Number(historyYear) === currentInfo.year
-  ? currentInfo.week
-  : getISOWeekInfo(`${historyYear}-12-28`).week;
+        historyWeek = Number(historyYear) === currentInfo.year
+          ? currentInfo.week
+          : getISOWeekInfo(`${historyYear}-12-28`).week;
 
       } else {
         historyMode = "list";
@@ -2552,10 +3164,29 @@ historyWeek = Number(historyYear) === currentInfo.year
   });
 
   // --------------------------------------------------
-  // HISTORY FILTERS
+  // HISTORY AND STATS FILTERS
   // --------------------------------------------------
 
   challengeCard.addEventListener("change", async event => {
+    const statsFilter = event.target.closest("[data-stats-filter]");
+
+    if (statsFilter) {
+      const kind = statsFilter.dataset.statsFilter;
+
+      if (kind === "period") {
+        statsPeriod = statsFilter.value;
+      } else if (kind === "year") {
+        statsYear = Number(statsFilter.value);
+      } else if (kind === "month") {
+        statsMonth = Number(statsFilter.value);
+      } else if (kind === "week") {
+        statsWeek = Number(statsFilter.value);
+      }
+
+      await loadDashboard(currentUser);
+      return;
+    }
+
     const filter = event.target.closest("[data-history-filter]");
     if (!filter) return;
 
